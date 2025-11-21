@@ -20,6 +20,11 @@ MovementTracker="*res://scripts/core/movement_tracker.gd"
 SessionManager="*res://scripts/core/session_manager.gd"
 MovementAnalytics="*res://scripts/analytics/movement_analytics.gd"
 GameEvents="*res://scripts/core/game_events.gd"
+AudioManager="*res://scripts/core/audio_manager.gd"
+ScoreManager="*res://scripts/core/score_manager.gd"
+XRInputManager="*res://scripts/core/xr_input_manager.gd"
+AdaptiveDifficulty="*res://scripts/core/adaptive_difficulty.gd"
+ReplaySystem="*res://scripts/core/replay_system.gd"
 
 [display]
 

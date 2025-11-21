@@ -36,3 +36,57 @@ signal heat_map_updated(heat_map_data: Array)
 signal hud_visibility_changed(visible: bool)
 signal menu_opened(menu_name: String)
 signal menu_closed(menu_name: String)
+
+# Score and combo events
+signal score_changed(new_score: int)
+signal combo_changed(combo: int)
+signal combo_lost()
+signal multiplier_changed(multiplier: float)
+
+# Target events
+signal target_spawned(target: Node3D)
+signal target_destroyed(target: Node3D, velocity: float)
+signal target_missed(target: Node3D)
+
+# Force power events
+signal force_push_activated(position: Vector3, direction: Vector3)
+signal force_pull_activated(position: Vector3)
+signal force_power_ready(power_type: String)
+
+# Training events
+signal training_mode_started(mode_name: String)
+signal training_mode_ended(mode_name: String, results: Dictionary)
+signal wave_started(wave_number: int)
+signal wave_completed(wave_number: int)
+
+# Tutorial events
+signal tutorial_started(tutorial_id: String)
+signal tutorial_step_changed(step_name: String, instruction: String)
+signal tutorial_completed(tutorial_id: String)
+
+# Difficulty events
+signal difficulty_changed(new_level: float)
+signal difficulty_zone_entered(zone_name: String)
+
+# Replay events
+signal replay_recording_started()
+signal replay_recording_stopped()
+signal replay_playback_started()
+signal replay_playback_stopped()
+
+# Environment events
+signal environment_changed(env_name: String)
+signal theme_changed(theme_name: String)
+
+# VFX and haptic requests
+signal vfx_requested(effect_name: String, position: Vector3, direction: Vector3)
+signal sfx_requested(sound_name: String, position: Vector3)
+signal haptic_feedback(hand: int, pattern: Resource, intensity: float)
+
+# Calibration events
+signal calibration_started()
+signal calibration_completed(data: Dictionary)
+
+# Avatar events
+signal avatar_pose_updated()
+signal avatar_visibility_changed(visible: bool)

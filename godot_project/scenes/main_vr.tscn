@@ -1,0 +1,68 @@
+[gd_scene load_steps=10 format=3]
+
+[ext_resource type="Script" path="res://scripts/main_vr.gd" id="1_main"]
+[ext_resource type="Script" path="res://scripts/dojo_environment.gd" id="2_dojo"]
+[ext_resource type="Script" path="res://scripts/combat/lightsaber.gd" id="3_saber"]
+[ext_resource type="Script" path="res://scripts/combat/target_spawner.gd" id="4_spawner"]
+[ext_resource type="Script" path="res://scripts/visualization/movement_trail.gd" id="5_trail"]
+[ext_resource type="Script" path="res://scripts/visualization/movement_heat_map.gd" id="6_heatmap"]
+[ext_resource type="Script" path="res://scripts/visualization/gap_indicator.gd" id="7_gap"]
+[ext_resource type="Script" path="res://scripts/ui/movement_hud.gd" id="8_hud"]
+
+[sub_resource type="Environment" id="Environment_main"]
+background_mode = 1
+background_color = Color(0.05, 0.05, 0.1, 1)
+ambient_light_source = 2
+ambient_light_color = Color(0.15, 0.15, 0.2, 1)
+ambient_light_energy = 0.5
+tonemap_mode = 2
+glow_enabled = true
+glow_intensity = 0.5
+glow_bloom = 0.3
+
+[node name="MainVR" type="Node3D"]
+script = ExtResource("1_main")
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("Environment_main")
+
+[node name="XROrigin3D" type="XROrigin3D" parent="."]
+
+[node name="XRCamera3D" type="XRCamera3D" parent="XROrigin3D"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.6, 0)
+
+[node name="LeftController" type="XRController3D" parent="XROrigin3D"]
+tracker = &"left_hand"
+
+[node name="LeftSaber" type="Node3D" parent="XROrigin3D/LeftController"]
+script = ExtResource("3_saber")
+blade_color = Color(0.2, 0.8, 0.2, 1)
+
+[node name="RightController" type="XRController3D" parent="XROrigin3D"]
+tracker = &"right_hand"
+
+[node name="RightSaber" type="Node3D" parent="XROrigin3D/RightController"]
+script = ExtResource("3_saber")
+blade_color = Color(0.2, 0.5, 1, 1)
+
+[node name="DojoEnvironment" type="Node3D" parent="."]
+script = ExtResource("2_dojo")
+
+[node name="TargetSpawner" type="Node3D" parent="."]
+script = ExtResource("4_spawner")
+
+[node name="MovementTrail" type="Node3D" parent="."]
+script = ExtResource("5_trail")
+
+[node name="LeftTrailMesh" type="MeshInstance3D" parent="MovementTrail"]
+
+[node name="RightTrailMesh" type="MeshInstance3D" parent="MovementTrail"]
+
+[node name="MovementHeatMap" type="Node3D" parent="."]
+script = ExtResource("6_heatmap")
+
+[node name="GapIndicators" type="Node3D" parent="."]
+script = ExtResource("7_gap")
+
+[node name="MovementHUD" type="Node3D" parent="."]
+script = ExtResource("8_hud")

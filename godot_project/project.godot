@@ -1,0 +1,59 @@
+; Movement Dojo XR - Godot 4.x Project Configuration
+; Serious game for movement wellness with lightsaber combat
+
+[configuration]
+
+config_version=5
+
+[application]
+
+config/name="Movement Dojo XR"
+config/description="VR movement wellness serious game with lightsaber combat"
+config/version="0.1.0"
+run/main_scene="res://scenes/main_vr.tscn"
+config/features=PackedStringArray("4.2", "Forward Plus")
+config/icon="res://icon.svg"
+
+[autoload]
+
+MovementTracker="*res://scripts/core/movement_tracker.gd"
+SessionManager="*res://scripts/core/session_manager.gd"
+MovementAnalytics="*res://scripts/analytics/movement_analytics.gd"
+GameEvents="*res://scripts/core/game_events.gd"
+
+[display]
+
+window/size/viewport_width=1920
+window/size/viewport_height=1080
+window/vsync/vsync_mode=0
+
+[xr]
+
+openxr/enabled=true
+openxr/default_action_map="res://resources/openxr_action_map.tres"
+openxr/form_factor=0
+openxr/view_configuration=1
+openxr/reference_space=2
+openxr/foveation_level=3
+openxr/foveation_dynamic=true
+shaders/enabled=true
+
+[rendering]
+
+renderer/rendering_method="forward_plus"
+textures/vram_compression/import_etc2_astc=true
+anti_aliasing/quality/msaa_3d=2
+lights_and_shadows/directional_shadow/soft_shadow_filter_quality=3
+environment/defaults/default_clear_color=Color(0.05, 0.05, 0.1, 1)
+
+[physics]
+
+common/physics_ticks_per_second=90
+3d/default_gravity=9.8
+
+[input]
+
+xr_menu={
+"deadzone": 0.5,
+"events": []
+}

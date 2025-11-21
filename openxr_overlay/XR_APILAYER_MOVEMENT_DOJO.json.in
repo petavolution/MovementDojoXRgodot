@@ -1,0 +1,15 @@
+{
+    "file_format_version": "1.0.0",
+    "api_layer": {
+        "name": "XR_APILAYER_MOVEMENT_DOJO",
+        "library_path": "@CMAKE_INSTALL_PREFIX@/lib/libXR_APILAYER_MOVEMENT_DOJO.so",
+        "api_version": "1.0",
+        "implementation_version": "1",
+        "description": "Movement Dojo - Universal VR movement tracking and visualization overlay",
+        "functions": {
+            "xrGetInstanceProcAddr": "MovementDojo_xrGetInstanceProcAddr"
+        },
+        "instance_extensions": [],
+        "enable_environment": "MOVEMENT_DOJO_ENABLE"
+    }
+}

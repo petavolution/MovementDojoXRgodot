@@ -80,6 +80,31 @@ var spawn_parent: Node3D
 var is_active := false
 
 # =============================================================================
+# WAVE TRACKING (for completion detection)
+# =============================================================================
+
+## Current wave ID being spawned
+var current_wave_id: String = ""
+
+## Enemies spawned in current wave (for completion tracking)
+var wave_enemies_total := 0
+
+## Enemies killed in current wave by player
+var wave_enemies_killed := 0
+
+## Projectiles fired this wave
+var wave_projectiles_fired := 0
+
+## Projectiles blocked this wave
+var wave_projectiles_blocked := 0
+
+## Hits taken by player this wave
+var wave_hits_taken := 0
+
+## Whether wave spawning is complete (all entries processed)
+var wave_spawning_complete := false
+
+# =============================================================================
 # LIFECYCLE
 # =============================================================================
 
@@ -119,6 +144,81 @@ func disable() -> void:
 
 
 # =============================================================================
+# WAVE LIFECYCLE
+# =============================================================================
+
+## Start a new wave - resets wave tracking
+func start_wave(wave_id: String) -> void:
+	# Cleanup any remaining entities from previous wave
+	if has_active_enemies():
+		DebugLogger.warn(SOURCE, "Starting wave '%s' with %d enemies still active - cleaning up" % [
+			wave_id, get_active_enemy_count()
+		])
+		despawn_all()
+
+	current_wave_id = wave_id
+	wave_enemies_total = 0
+	wave_enemies_killed = 0
+	wave_projectiles_fired = 0
+	wave_projectiles_blocked = 0
+	wave_hits_taken = 0
+	wave_spawning_complete = false
+
+	DebugLogger.debug(SOURCE, "Wave '%s' started - tracking reset" % wave_id)
+
+
+## Mark wave spawning as complete (all entries processed)
+func mark_spawning_complete() -> void:
+	wave_spawning_complete = true
+	DebugLogger.debug(SOURCE, "Wave '%s' spawning complete: %d enemies total" % [
+		current_wave_id, wave_enemies_total
+	])
+
+
+## End current wave - returns metrics and cleans up
+func end_wave() -> Dictionary:
+	var metrics := get_wave_metrics()
+
+	DebugLogger.info(SOURCE, "Wave '%s' ended: spawned=%d, killed=%d, blocked=%d, hits_taken=%d" % [
+		current_wave_id,
+		metrics.get("enemies_spawned", 0),
+		metrics.get("enemies_killed", 0),
+		metrics.get("projectiles_blocked", 0),
+		metrics.get("hits_taken", 0)
+	])
+
+	# Cleanup remaining entities
+	despawn_all()
+
+	# Reset wave tracking
+	current_wave_id = ""
+	wave_spawning_complete = false
+
+	return metrics
+
+
+## Get current wave metrics
+func get_wave_metrics() -> Dictionary:
+	return {
+		"wave_id": current_wave_id,
+		"enemies_spawned": wave_enemies_total,
+		"enemies_killed": wave_enemies_killed,
+		"enemies_remaining": get_active_enemy_count(),
+		"projectiles_fired": wave_projectiles_fired,
+		"projectiles_blocked": wave_projectiles_blocked,
+		"hits_taken": wave_hits_taken,
+		"spawning_complete": wave_spawning_complete,
+	}
+
+
+## Check if current wave is complete (all enemies dead, spawning done)
+func is_wave_complete() -> bool:
+	if not wave_spawning_complete:
+		return false
+	return get_active_enemy_count() == 0
+
+
+# =============================================================================
 # SPAWNING API
 # =============================================================================
 
@@ -134,6 +234,7 @@ func spawn_from_entry(entry: WaveSpawnEntry) -> Array[Node3D]:
 
 	var spawned: Array[Node3D] = []
 	var positions := _calculate_spawn_positions(entry)
+	var spawn_failed := 0
 
 	DebugLogger.debug(SOURCE, "Spawning: %s" % entry.get_summary())
 
@@ -141,6 +242,15 @@ func spawn_from_entry(entry: WaveSpawnEntry) -> Array[Node3D]:
 		var enemy := _create_enemy(entry, positions[i])
 		if enemy:
 			spawned.append(enemy)
+			wave_enemies_total += 1
+		else:
+			spawn_failed += 1
+			DebugLogger.error(SOURCE, "Failed to spawn enemy %d of %d (%s)" % [
+				i + 1, entry.count, WaveSpawnEntry.get_enemy_type_name(entry.enemy_type)
+			])
+
+	if spawn_failed > 0:
+		DebugLogger.warn(SOURCE, "Spawn entry had %d failures out of %d" % [spawn_failed, entry.count])
 
 	return spawned
 
@@ -395,15 +505,26 @@ func _register_enemy(enemy: Node3D, entry: WaveSpawnEntry) -> void:
 
 func _on_drone_destroyed(by_player: bool, enemy: Node3D) -> void:
 	active_enemies.erase(enemy)
+
+	# Track wave metric
+	if by_player:
+		wave_enemies_killed += 1
+		DebugLogger.debug(SOURCE, "Enemy killed by player (%d/%d in wave '%s')" % [
+			wave_enemies_killed, wave_enemies_total, current_wave_id
+		])
+
 	enemy_destroyed.emit(enemy, by_player)
 
+	# Check if all enemies destroyed
 	if active_enemies.is_empty():
+		DebugLogger.debug(SOURCE, "All enemies destroyed for wave '%s'" % current_wave_id)
 		all_enemies_destroyed.emit()
 
 
 func _on_projectile_fired(projectile: Projectile, enemy: Node3D) -> void:
 	if projectile and is_instance_valid(projectile):
 		active_projectiles.append(projectile)
+		wave_projectiles_fired += 1
 
 		# Connect projectile signals
 		if projectile.has_signal("deflected"):
@@ -415,18 +536,32 @@ func _on_projectile_fired(projectile: Projectile, enemy: Node3D) -> void:
 
 
 func _on_projectile_deflected(projectile: Node3D) -> void:
+	wave_projectiles_blocked += 1
+	DebugLogger.debug(SOURCE, "Projectile blocked (%d total in wave '%s')" % [
+		wave_projectiles_blocked, current_wave_id
+	])
 	projectile_blocked.emit(projectile)
 
 
 func _on_projectile_hit(projectile: Node3D) -> void:
+	wave_hits_taken += 1
+	DebugLogger.debug(SOURCE, "Player hit by projectile (%d hits in wave '%s')" % [
+		wave_hits_taken, current_wave_id
+	])
 	projectile_hit_player.emit(projectile)
 
 
 func _on_dive_started(enemy: Node3D) -> void:
+	DebugLogger.debug(SOURCE, "Dive attack started in wave '%s'" % current_wave_id)
 	dive_started.emit(enemy)
 
 
 func _on_dive_completed(hit_player: bool, enemy: Node3D) -> void:
+	if hit_player:
+		wave_hits_taken += 1
+		DebugLogger.debug(SOURCE, "Player hit by dive attack (%d hits in wave '%s')" % [
+			wave_hits_taken, current_wave_id
+		])
 	dive_completed.emit(enemy, hit_player)
 
 

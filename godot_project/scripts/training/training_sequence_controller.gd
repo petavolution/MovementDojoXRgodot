@@ -256,15 +256,43 @@ func abort(reason: String = "") -> void:
 		return
 
 	var abort_reason := reason if reason else "User abort"
-	DebugLogger.warn(SOURCE, "SEQUENCE ABORTED: %s" % abort_reason)
+	DebugLogger.warn(SOURCE, "")
+	DebugLogger.warn(SOURCE, "═══ SEQUENCE ABORTED ═══")
+	DebugLogger.warn(SOURCE, "Reason: %s" % abort_reason)
+	DebugLogger.warn(SOURCE, "Phase: %d/%d (%s)" % [
+		current_phase_index + 1,
+		active_sequence.phases.size() if active_sequence else 0,
+		current_phase.display_name if current_phase else "none"
+	])
+	DebugLogger.warn(SOURCE, "Wave: %d/%d (%s)" % [
+		current_wave_index + 1,
+		current_phase.waves.size() if current_phase else 0,
+		current_wave.wave_id if current_wave else "none"
+	])
+	DebugLogger.warn(SOURCE, "Duration: %.1fs" % sequence_elapsed)
+
+	# Cancel any pending timers
+	_cancel_pending_timers()
+
+	# Cleanup spawner
+	if spawner:
+		var metrics := spawner.end_wave()
+		DebugLogger.debug(SOURCE, "Final wave metrics: %s" % str(metrics))
 
 	_finalize_stats()
 	state = ControllerState.ABORTED
 
-	if spawner:
-		spawner.despawn_all()
-
 	sequence_aborted.emit(active_sequence, abort_reason)
+
+
+## Cancel any pending transition or spawn timers
+func _cancel_pending_timers() -> void:
+	if _transition_timer:
+		# Can't cancel SceneTreeTimer, just null the reference
+		_transition_timer = null
+	if _spawn_timer:
+		_spawn_timer = null
+	_spawn_queue.clear()
 
 
 ## Skip to a specific phase (by index)
@@ -460,11 +488,16 @@ func _advance_to_wave(index: int) -> void:
 	wave_elapsed = 0.0
 	_reset_wave_stats()
 
-	DebugLogger.debug(SOURCE, "Wave %d/%d: %s" % [
+	# Initialize spawner wave tracking
+	if spawner:
+		spawner.start_wave(wave.wave_id)
+
+	DebugLogger.info(SOURCE, "")
+	DebugLogger.info(SOURCE, "--- Wave %d/%d: %s ---" % [
 		index + 1, current_phase.waves.size(), wave.wave_id
 	])
-	DebugLogger.debug(SOURCE, "  Spawns: %s" % wave.get_spawn_summary())
-	DebugLogger.debug(SOURCE, "  Completion: %s" % wave.get_completion_description())
+	DebugLogger.info(SOURCE, "  Spawns: %s" % wave.get_spawn_summary())
+	DebugLogger.info(SOURCE, "  Completion: %s" % wave.get_completion_description())
 
 	# Show wave message
 	if wave.start_message:
@@ -489,6 +522,7 @@ func _start_wave_spawning() -> void:
 		# Spawn all entries at once
 		for entry in wave.spawn_entries:
 			_spawn_entry(entry)
+		_on_wave_spawning_complete()
 	else:
 		# Queue entries for staggered spawning
 		_spawn_queue = wave.spawn_entries.duplicate()
@@ -497,15 +531,20 @@ func _start_wave_spawning() -> void:
 
 func _spawn_entry(entry: WaveSpawnEntry) -> void:
 	if not spawner:
+		DebugLogger.error(SOURCE, "No spawner available - cannot spawn enemies")
 		return
 
 	var enemies := spawner.spawn_from_entry(entry)
 	wave_enemies_spawned += enemies.size()
 	wave_stats["enemies_spawned"] = wave_enemies_spawned
 
+	if enemies.is_empty() and entry.count > 0:
+		DebugLogger.error(SOURCE, "Spawn failed for entry: %s" % entry.get_summary())
+
 
 func _process_spawn_queue() -> void:
 	if _spawn_queue.is_empty():
+		_on_wave_spawning_complete()
 		return
 
 	var entry := _spawn_queue.pop_front()
@@ -519,6 +558,15 @@ func _process_spawn_queue() -> void:
 
 		_spawn_timer = get_tree().create_timer(interval)
 		_spawn_timer.timeout.connect(_process_spawn_queue)
+	else:
+		_on_wave_spawning_complete()
+
+
+## Called when all spawn entries have been processed
+func _on_wave_spawning_complete() -> void:
+	if spawner:
+		spawner.mark_spawning_complete()
+	DebugLogger.debug(SOURCE, "Wave spawning complete: %d enemies total" % wave_enemies_spawned)
 
 
 func _process_wave(_delta: float) -> void:
@@ -573,32 +621,53 @@ func _complete_wave(success: bool, reason: String) -> void:
 	if not wave:
 		return
 
+	# Get metrics from spawner before cleanup
+	var spawner_metrics := {}
+	if spawner:
+		spawner_metrics = spawner.end_wave()
+
+	# Build comprehensive wave stats
 	wave_stats["duration"] = wave_elapsed
 	wave_stats["success"] = success
 	wave_stats["completion_reason"] = reason
-	wave_stats["enemies_destroyed"] = wave_enemies_destroyed
-	wave_stats["projectiles_blocked"] = wave_projectiles_blocked
+	wave_stats["enemies_spawned"] = spawner_metrics.get("enemies_spawned", wave_enemies_spawned)
+	wave_stats["enemies_destroyed"] = spawner_metrics.get("enemies_killed", wave_enemies_destroyed)
+	wave_stats["projectiles_blocked"] = spawner_metrics.get("projectiles_blocked", wave_projectiles_blocked)
+	wave_stats["hits_taken"] = spawner_metrics.get("hits_taken", 0)
 
+	# Log wave completion with metrics
+	DebugLogger.info(SOURCE, "")
 	if success:
-		DebugLogger.debug(SOURCE, "Wave '%s' completed: %s (%.1fs)" % [
+		DebugLogger.info(SOURCE, "Wave '%s' COMPLETED: %s (%.1fs)" % [
+			wave.wave_id, reason, wave_elapsed
+		])
+	else:
+		DebugLogger.warn(SOURCE, "Wave '%s' FAILED: %s (%.1fs)" % [
 			wave.wave_id, reason, wave_elapsed
 		])
 
+	DebugLogger.info(SOURCE, "  Metrics: spawned=%d, killed=%d, blocked=%d, hits_taken=%d" % [
+		wave_stats["enemies_spawned"],
+		wave_stats["enemies_destroyed"],
+		wave_stats["projectiles_blocked"],
+		wave_stats["hits_taken"]
+	])
+
+	# Show feedback message
+	if success:
 		if wave.complete_message:
 			feedback_message.emit(wave.complete_message, "success")
-
 		wave_completed.emit(wave, wave_stats.duplicate())
 	else:
-		DebugLogger.debug(SOURCE, "Wave '%s' failed: %s" % [wave.wave_id, reason])
-
 		if wave.timeout_message:
 			feedback_message.emit(wave.timeout_message, "warning")
-
 		wave_failed.emit(wave, reason)
 
-	# Clear remaining enemies
-	if spawner:
-		spawner.despawn_all()
+	# Update phase stats with wave data
+	phase_stats["enemies_destroyed"] = phase_stats.get("enemies_destroyed", 0) + wave_stats["enemies_destroyed"]
+	phase_stats["projectiles_blocked"] = phase_stats.get("projectiles_blocked", 0) + wave_stats["projectiles_blocked"]
+	phase_stats["hits_taken"] = phase_stats.get("hits_taken", 0) + wave_stats["hits_taken"]
+	phase_stats["waves_completed"] = phase_stats.get("waves_completed", 0) + (1 if success else 0)
 
 	# Advance to next wave after delay
 	state = ControllerState.WAVE_TRANSITION

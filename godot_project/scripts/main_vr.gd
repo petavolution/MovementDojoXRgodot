@@ -249,6 +249,10 @@ func _setup_controllers() -> void:
 	if not tracker_ready:
 		DebugLogger.warn(SOURCE, "Movement tracker partially configured")
 
+	# Initialize XRInputManager with controller references
+	XRInputManager.setup(left_controller, right_controller)
+	DebugLogger.debug(SOURCE, "XRInputManager configured")
+
 	# Setup HUD references
 	if movement_hud:
 		movement_hud.setup_references(xr_camera, left_controller)
@@ -293,8 +297,10 @@ func _change_state(new_state: GameState) -> void:
 
 
 func _enter_menu_state() -> void:
-	# Show menu, hide training elements
+	# Stop and hide training elements
 	if target_spawner:
+		if target_spawner.has_method("stop_training"):
+			target_spawner.stop_training()
 		target_spawner.visible = false
 
 	# Deactivate sabers
@@ -313,9 +319,12 @@ func _enter_training_state() -> void:
 	if not SessionManager.session_active:
 		SessionManager.start_session()
 
-	# Show training elements
+	# Show and start training elements
 	if target_spawner:
 		target_spawner.visible = true
+		if target_spawner.has_method("start_training"):
+			target_spawner.start_training()
+			DebugLogger.info(SOURCE, "Training started - targets spawning")
 
 	# Enable visualizations based on settings
 	var settings := SessionManager.get_settings()

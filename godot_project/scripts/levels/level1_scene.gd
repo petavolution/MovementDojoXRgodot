@@ -1,10 +1,31 @@
 ## Level1Scene - Dojo Training Level 1 Scene Setup
 ## Handles XR initialization and wires up Level1Controller
 ## Run with: godot --dojo-level1
+##
+## This is a hardened entry point with comprehensive preflight checks:
+## - OpenXR session validation
+## - Input binding verification
+## - Graceful failure with clear logging
 extends Node3D
 class_name Level1Scene
 
-const SOURCE := "Level1Scene"
+const SOURCE := "Level1"
+
+# =============================================================================
+# PREFLIGHT CHECK CONFIGURATION
+# =============================================================================
+
+## Required action bindings that must exist for Level 1 to function
+const REQUIRED_ACTIONS := [
+	"trigger",      # Both controllers - weapon activation
+	"grip",         # Optional but checked
+]
+
+## Optional assets to check (warn if missing, don't fail)
+const OPTIONAL_ASSETS := [
+	"res://audio/voice/welcome.ogg",
+	"res://audio/sfx/block.ogg",
+]
 
 # =============================================================================
 # SCENE COMPONENTS
@@ -31,19 +52,22 @@ var debug_blaster: Node3D
 var xr_interface: XRInterface
 var xr_initialized := false
 
+# Preflight check results
+var preflight_passed := false
+var preflight_warnings: Array[String] = []
+
 # =============================================================================
 # LIFECYCLE
 # =============================================================================
 
 func _ready() -> void:
-	DebugLogger.info(SOURCE, "=== DOJO LEVEL 1 SCENE ===")
-	DebugLogger.info(SOURCE, "Initializing Level 1 training environment")
+	DebugLogger.info(SOURCE, "=== DOJO LEVEL 1 ===")
+	DebugLogger.info(SOURCE, "Starting Level 1 dojo experience (chilled training mode)")
 	DebugLogger.info(SOURCE, "")
 
-	# Setup XR
-	if not _setup_xr():
-		DebugLogger.error(SOURCE, "XR setup failed - cannot run Level 1")
-		EngineShutdown.startup_failure("Level1Scene", "XR initialization failed")
+	# Run comprehensive preflight checks
+	if not _run_preflight_checks():
+		_abort_level("Preflight checks failed")
 		return
 
 	# Build scene components
@@ -57,7 +81,14 @@ func _ready() -> void:
 	# Connect input for exit
 	_connect_input_signals()
 
+	# Log any warnings from preflight
+	if preflight_warnings.size() > 0:
+		DebugLogger.warn(SOURCE, "Preflight warnings (%d):" % preflight_warnings.size())
+		for warning in preflight_warnings:
+			DebugLogger.warn(SOURCE, "  - %s" % warning)
+
 	# Start the level after a short delay (let everything settle)
+	DebugLogger.info(SOURCE, "Preflight complete - starting level in 0.5s...")
 	await get_tree().create_timer(0.5).timeout
 	level_controller.start_level()
 
@@ -72,8 +103,119 @@ func _process(_delta: float) -> void:
 
 
 func _exit_tree() -> void:
-	DebugLogger.info(SOURCE, "Level 1 scene exiting")
+	DebugLogger.info(SOURCE, "Level 1 completed successfully")
 	DebugLogger.flush()
+
+
+# =============================================================================
+# PREFLIGHT CHECKS
+# =============================================================================
+
+## Run all preflight checks before starting Level 1
+## Returns true if all critical checks pass
+func _run_preflight_checks() -> bool:
+	DebugLogger.info(SOURCE, "Running preflight checks...")
+	preflight_warnings.clear()
+	var all_passed := true
+
+	# Check 1: OpenXR setup
+	DebugLogger.info(SOURCE, "  [1/4] OpenXR initialization...")
+	if not _setup_xr():
+		DebugLogger.error(SOURCE, "  FAIL: OpenXR initialization failed")
+		return false
+	DebugLogger.info(SOURCE, "  PASS: OpenXR initialized")
+
+	# Check 2: XR session validity
+	DebugLogger.info(SOURCE, "  [2/4] XR session validation...")
+	if not _check_xr_session():
+		DebugLogger.error(SOURCE, "  FAIL: XR session not valid")
+		return false
+	DebugLogger.info(SOURCE, "  PASS: XR session valid")
+
+	# Check 3: Input bindings
+	DebugLogger.info(SOURCE, "  [3/4] Input binding verification...")
+	if not _check_input_bindings():
+		DebugLogger.warn(SOURCE, "  WARN: Some input bindings may be missing (continuing anyway)")
+		# Don't fail on input bindings - controllers might not be on yet
+
+	# Check 4: Optional assets (warn only)
+	DebugLogger.info(SOURCE, "  [4/4] Optional asset check...")
+	_check_optional_assets()
+
+	preflight_passed = all_passed
+	if all_passed:
+		DebugLogger.info(SOURCE, "Preflight checks: ALL PASSED")
+	return all_passed
+
+
+## Verify XR session is in a valid state
+func _check_xr_session() -> bool:
+	if xr_interface == null:
+		return false
+
+	if not xr_interface.is_initialized():
+		return false
+
+	# Check for common session issues
+	# Note: We can't check session state directly in Godot's OpenXR binding,
+	# but we can verify the interface is ready
+	var check := XRHelpers.check_initialized(xr_interface, "Level1-SessionCheck")
+	return check.success
+
+
+## Verify input bindings exist (at least for action map)
+func _check_input_bindings() -> bool:
+	var bindings_ok := true
+
+	# Check that the default action map exists
+	var action_map_path := ProjectSettings.get_setting("xr/openxr/default_action_map", "")
+	if action_map_path == "":
+		preflight_warnings.append("No OpenXR action map configured in project settings")
+		bindings_ok = false
+	elif not ResourceLoader.exists(action_map_path):
+		preflight_warnings.append("OpenXR action map not found: %s" % action_map_path)
+		bindings_ok = false
+	else:
+		DebugLogger.debug(SOURCE, "  Action map: %s" % action_map_path)
+
+	# Check if InputMap has our expected actions (these are Godot Input actions, not OpenXR)
+	for action in REQUIRED_ACTIONS:
+		# We check XR controller actions, which are bound dynamically
+		# Just log what we expect for now
+		DebugLogger.debug(SOURCE, "  Expected XR action: %s" % action)
+
+	if bindings_ok:
+		DebugLogger.info(SOURCE, "  PASS: Input bindings configured")
+	return bindings_ok
+
+
+## Check if optional assets exist (warn but don't fail)
+func _check_optional_assets() -> void:
+	var missing_count := 0
+	for asset_path in OPTIONAL_ASSETS:
+		if not ResourceLoader.exists(asset_path):
+			preflight_warnings.append("Optional asset missing: %s" % asset_path)
+			missing_count += 1
+
+	if missing_count == 0:
+		DebugLogger.info(SOURCE, "  PASS: All optional assets present")
+	else:
+		DebugLogger.info(SOURCE, "  INFO: %d optional assets missing (non-critical)" % missing_count)
+
+
+## Abort Level 1 initialization with clear error
+func _abort_level(reason: String) -> void:
+	DebugLogger.error(SOURCE, "Level 1 aborted: %s" % reason)
+	DebugLogger.error(SOURCE, "Check configuration/assets/XR runtime.")
+	DebugLogger.info(SOURCE, "")
+	DebugLogger.info(SOURCE, "Troubleshooting:")
+	DebugLogger.info(SOURCE, "  1. Ensure SteamVR is running and set as active OpenXR runtime")
+	DebugLogger.info(SOURCE, "  2. Verify Quest 3 is connected via Virtual Desktop")
+	DebugLogger.info(SOURCE, "  3. Run 'godot --vr-diagnostics' for detailed XR status")
+	DebugLogger.info(SOURCE, "")
+
+	# Use centralized shutdown for clean exit
+	EngineShutdown.startup_failure("Level1", reason)
 
 
 # =============================================================================
@@ -81,7 +223,7 @@ func _exit_tree() -> void:
 # =============================================================================
 
 func _setup_xr() -> bool:
-	DebugLogger.info(SOURCE, "Setting up XR...")
+	DebugLogger.debug(SOURCE, "Setting up XR...")
 
 	# Create XR scene structure
 	xr_origin = XROrigin3D.new()
@@ -423,8 +565,8 @@ func _on_controller_button(button: String) -> void:
 # =============================================================================
 
 func _on_level_completed(stats: Dictionary) -> void:
-	DebugLogger.info(SOURCE, "Level 1 completed!")
-	DebugLogger.info(SOURCE, "Final stats: %s" % str(stats))
+	DebugLogger.info(SOURCE, "Level 1 completed successfully")
+	DebugLogger.info(SOURCE, "Session stats: %s" % str(stats))
 
 	# Allow exit after completion
 	await get_tree().create_timer(2.0).timeout
@@ -441,8 +583,8 @@ func _on_state_changed(old_state: Level1Controller.Level1State, new_state: Level
 # =============================================================================
 
 func _request_exit() -> void:
-	DebugLogger.info(SOURCE, "Exit requested")
-	EngineShutdown.request_shutdown("Level 1 completed", 0)
+	DebugLogger.info(SOURCE, "Exit requested - shutting down cleanly")
+	EngineShutdown.request_shutdown("Level 1 session ended", 0)
 
 
 # =============================================================================

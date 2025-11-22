@@ -1,391 +1,289 @@
-# Movement Dojo XR - Testing Guide
+# Dojo Test Ritual
 
-This document describes the testing infrastructure and workflows for ensuring core engine stability.
+Manual test procedure for verifying VR dojo engine stability before development.
+Run this ritual after any significant changes to XR, rendering, or input systems.
 
-## Quick Start
+## Prerequisites
 
-```bash
-# Run all tests (requires Godot 4.x installed)
-./tools/run_tests.sh
+- Meta Quest 3 headset
+- Virtual Desktop installed and configured
+- SteamVR installed and set as active OpenXR runtime
+- PC and Quest on same network (preferably 5GHz WiFi or wired)
 
-# Or with custom Godot path
-./tools/run_tests.sh -g /path/to/godot
+## Pre-Test Checklist
 
-# Using Python CLI
-python tools/dojo_cli.py test
+1. **Start SteamVR**
+   - Launch SteamVR on PC
+   - Wait for "Ready" status in system tray
 
-# Validate project files
-python tools/dojo_cli.py validate --all
+2. **Connect Quest 3 via Virtual Desktop**
+   - Put on headset
+   - Launch Virtual Desktop
+   - Connect to PC
+   - Verify "SteamVR" appears in Games tab
 
-# Lint GDScript
-python tools/dojo_cli.py lint
-```
+3. **Verify Tracking**
+   - In SteamVR Home, confirm:
+     - HMD shows green in SteamVR status window
+     - Both controllers show green and tracked
+   - Move around to verify play space is configured
 
-## Test Architecture
+## Step 1: VR Diagnostics
 
-```
-godot_project/tests/
-├── test_runner.gd          # Main headless test runner
-├── unit/                   # Unit tests for individual components
-│   ├── test_movement_frame.gd
-│   ├── test_score_system.gd
-│   └── ...
-└── integration/            # Integration tests for data flow
-    ├── test_data_pipeline.gd
-    └── ...
-
-tools/
-├── run_tests.sh            # Shell script test runner
-└── dojo_cli.py             # Python CLI for testing & validation
-```
-
-## Running Tests
-
-### Method 1: Shell Script (Recommended)
-
-```bash
-# Basic usage
-./tools/run_tests.sh
-
-# Specify Godot path
-./tools/run_tests.sh -g /usr/local/bin/godot4
-
-# Via environment variable
-GODOT_PATH=/path/to/godot ./tools/run_tests.sh
-
-# Verbose output
-./tools/run_tests.sh -v
-```
-
-### Method 2: Python CLI
-
-```bash
-# Run tests
-python tools/dojo_cli.py test
-
-# With custom Godot path
-python tools/dojo_cli.py test --godot /path/to/godot
-```
-
-### Method 3: Direct Godot
+Run the automated diagnostics to verify OpenXR setup:
 
 ```bash
 cd godot_project
-godot --headless --script res://tests/test_runner.gd
+godot --vr-diagnostics
 ```
 
-## Test Output
-
-Tests produce output in this format:
-
+**Expected Result:**
 ```
-============================================================
-Movement Dojo XR - Test Suite
-============================================================
-
-[SUITE] MovementFrame
-  [PASS] create_timestamp
-  [PASS] create_delta
-  [PASS] velocity_computation_x
-  [FAIL] some_failing_test
-         Expected: 100
-         Got:      99
-
-[SUITE] ScoreSystem
-  [PASS] combo_mult_0
-  ...
-
-============================================================
-RESULTS: 45 passed, 1 failed, 46 total
-============================================================
+VR Diagnostics: PASS – Ready for dojo prototype.
+Log file: ~/.local/share/godot/app_userdata/Movement Dojo XR/logs/engine.log
 ```
 
-Exit codes:
-- `0` = All tests passed
-- `1` = One or more tests failed
+**If FAIL:**
+1. Check the log file for detailed error information
+2. Common issues:
+   - "OpenXR interface not found" → SteamVR not set as active runtime
+   - "HMD not detected" → Virtual Desktop not streaming, or SteamVR not detecting Quest
+   - "Tracking unstable" → Poor lighting, move to better lit area
+3. See `xr_helpers.gd` for common fix suggestions
 
-## Test Categories
+**What It Tests:**
+- OpenXR runtime detection (SteamVR)
+- HMD detection and initialization
+- Display configuration (resolution, refresh rate)
+- 5-second frame loop with pose tracking
+- 80%+ HMD pose validity requirement
 
-### Unit Tests
+## Step 2: VR Smoke Test
 
-Test individual components in isolation.
-
-| Test Class | System Under Test | Key Tests |
-|------------|-------------------|-----------|
-| `TestMovementFrame` | `MovementFrame` | Velocity computation, derived metrics, serialization |
-| `TestScoreSystem` | `ScoreManager` | Combo multipliers, point calculation, accuracy |
-| `TestMovementSpaceMap` | `MovementSpaceMap` | Grid math, coverage, symmetry |
-| `TestProprioceptionMath` | Math utilities | Position deviation, rotation deviation |
-| `TestHapticPatterns` | `HapticPatterns` | Pattern structure, amplitude bounds |
-| `TestSerialization` | JSON round-trips | Frame and map serialization |
-
-### Integration Tests
-
-Test data flow between components.
-
-| Test Class | Flow Under Test | Key Tests |
-|------------|-----------------|-----------|
-| `TestDataPipeline` | Frame → SpaceMap → Analytics | Session simulation, coverage tracking |
-| `TestDataFlow` | End-to-end data flow | Multi-frame processing |
-
-## Writing New Tests
-
-### 1. Create Test Class
-
-```gdscript
-## Unit Tests for MySystem
-extends RefCounted
-class_name TestMySystem
-
-
-static func run_all() -> Array[Dictionary]:
-    var results: Array[Dictionary] = []
-    results.append_array(_test_basic_functionality())
-    results.append_array(_test_edge_cases())
-    return results
-
-
-static func _test_basic_functionality() -> Array[Dictionary]:
-    var results: Array[Dictionary] = []
-
-    # Test case
-    var actual := MySystem.compute_something(10)
-    results.append(_eq(actual, 100, "compute_basic"))
-
-    return results
-
-
-# Test helpers
-static func _eq(actual, expected, name: String) -> Dictionary:
-    return {
-        "name": name,
-        "suite": "MySystem",
-        "passed": actual == expected,
-        "expected": expected,
-        "actual": actual
-    }
-
-static func _near(actual: float, expected: float, epsilon: float, name: String) -> Dictionary:
-    return {
-        "name": name,
-        "suite": "MySystem",
-        "passed": abs(actual - expected) <= epsilon,
-        "expected": expected,
-        "actual": actual,
-        "message": "epsilon=" + str(epsilon)
-    }
-
-static func _true(condition: bool, name: String) -> Dictionary:
-    return {
-        "name": name,
-        "suite": "MySystem",
-        "passed": condition,
-        "expected": true,
-        "actual": condition
-    }
-```
-
-### 2. Register in Test Runner
-
-Edit `tests/test_runner.gd`:
-
-```gdscript
-func _run_all_tests() -> void:
-    # ... existing tests ...
-    _run_suite("MySystem", TestMySystem.run_all())
-```
-
-### 3. Test Naming Conventions
-
-- Test classes: `TestSystemName` (e.g., `TestMovementFrame`)
-- Test methods: `_test_category()` (e.g., `_test_velocity_computation`)
-- Test names: `snake_case` descriptive name (e.g., `"velocity_left_x"`)
-
-## Python CLI Tools
-
-### Validate Project
+Run the visual smoke test to verify rendering and tracking:
 
 ```bash
-# Validate all (scripts + sessions)
-python tools/dojo_cli.py validate --all
-
-# Just scripts
-python tools/dojo_cli.py validate --scripts
-
-# Just session files
-python tools/dojo_cli.py validate --sessions
-
-# Verbose (show info messages)
-python tools/dojo_cli.py validate --all --verbose
+cd godot_project
+godot --vr-smoke-test
 ```
 
-### Lint GDScript
+**Expected in HMD:**
+- Dark gray floor (10m × 10m)
+- Four corner pillars
+- Back wall for depth reference
+- Right hand: Silver saber hilt (trigger to activate cyan blade)
+- Left hand: Dark blaster body with barrel
+- Red hovering sphere (dummy drone) at head height
+
+**Expected in Log (1Hz updates):**
+```
+[SmokeTest] Tracking: HMD=OK Left=OK Right=OK
+```
+
+**Test Actions:**
+1. Look around - verify stereo rendering and head tracking
+2. Move controllers - verify they follow your hands
+3. Pull right trigger - saber blade should appear (cyan glow)
+4. Pull left trigger - blaster should flash orange
+5. Press menu button or ESC to exit cleanly
+
+**If Issues:**
+- No controllers visible → Check XRInputManager logs for binding issues
+- Jittery tracking → Check Virtual Desktop streaming quality
+- Black screen → Check SteamVR compositor, restart VR
+
+## Step 3: Dojo Level 1 Training
+
+Run the Level 1 training sequence to test the full gameplay loop:
 
 ```bash
-python tools/dojo_cli.py lint
+cd godot_project
+godot --dojo-level1
 ```
 
-Checks for:
-- Missing `class_name` on RefCounted classes
-- Missing type hints on function parameters
-- TODO/FIXME comments
+Level 1 uses the same hardened OpenXR startup as diagnostics/smoke test, with additional
+preflight checks for assets and input bindings.
 
-### Analyze Session Data
+**Expected in HMD:**
+- Octagonal dojo environment with dark walls and blue accent lighting
+- Right hand: Debug saber with cyan glowing blade (always active in Level 1)
+- Left hand: Debug blaster
+- Floating 3D text prompts guiding through training phases
+- Visual feedback: "BLOCKED!", "HIT!", "DESTROYED!", etc.
+
+**Training Flow (State Machine):**
+1. **INTRO** (~10s): Welcome message, controls overview, "Relax and enjoy the chilled training"
+2. **SABER_DRILL**: Block slow-moving projectiles with saber (3 required)
+   - Slow projectiles (2 m/s) from stationary drone
+   - Visual feedback on successful blocks
+3. **BLASTER_DRILL**: Destroy stationary targets with blaster (4 required)
+   - Targets spawn at comfortable range
+   - Track hits and accuracy
+4. **MIXED_DRILL**: Combined combat with drones and one dive attack
+   - Destroy drones while blocking projectiles
+   - One clearly telegraphed dive attack (⚠️ DIVE ATTACK! warning)
+   - Evade or block the dive
+5. **SUMMARY**: Display session stats in floating panel
+   - Total duration, blocks, hits, drones destroyed
+   - Dive attack result (evaded/hit)
+
+**Expected in Log (preflight + phases):**
+```
+[Level1] === DOJO LEVEL 1 ===
+[Level1] Starting Level 1 dojo experience (chilled training mode)
+[Level1] Running preflight checks...
+[Level1]   [1/4] OpenXR initialization...
+[Level1]   PASS: OpenXR initialized
+[Level1]   [2/4] XR session validation...
+[Level1]   PASS: XR session valid
+[Level1]   [3/4] Input binding verification...
+[Level1]   PASS: Input bindings configured
+[Level1]   [4/4] Optional asset check...
+[Level1] Preflight checks: ALL PASSED
+[Level1] State: IDLE → INTRO
+[Level1] State: INTRO → SABER_DRILL
+[Level1] State: SABER_DRILL → BLASTER_DRILL
+[Level1] State: BLASTER_DRILL → MIXED_DRILL
+[Level1] State: MIXED_DRILL → SUMMARY
+[Level1] === LEVEL 1 SUMMARY ===
+[Level1] Level 1 completed successfully
+```
+
+**Test Actions:**
+1. Put on headset and verify you're in the octagonal dojo
+2. Read the floating intro text
+3. **SABER_DRILL**: Block 3 slow projectiles with your saber
+4. **BLASTER_DRILL**: Shoot 4 targets with your blaster (left trigger)
+5. **MIXED_DRILL**: Destroy drones and watch for "DIVE ATTACK!" warning
+6. **SUMMARY**: Review your stats in the floating panel
+7. Press menu button or ESC to exit cleanly
+
+**Key Characteristics (Chilled Mode):**
+- Slow projectiles (2 m/s) - easy to track and block
+- Few drones (1-2 at a time)
+- Clearly telegraphed dive attack with 1.2s warning
+- Generous hit detection
+- No time pressure on drills
+
+**If Issues:**
+- "Preflight checks failed" → Check log for specific FAIL message
+- State not advancing → Check for timer or spawner issues in log
+- No visual feedback → Verify Level1Feedback is created
+- Immediate exit → Look for "Level 1 aborted" in log with reason
+- Dive attack not appearing → Check Level1DroneSpawner logs
+
+## Step 4: Normal Launch (Optional)
+
+If Steps 1-3 pass, the full engine should work:
 
 ```bash
-# List saved sessions
-python tools/dojo_cli.py analyze --list
-
-# Analyze latest session
-python tools/dojo_cli.py analyze --latest
-
-# Analyze specific file
-python tools/dojo_cli.py analyze --file /path/to/session.json
+cd godot_project
+godot
 ```
 
-### Project Info
+This loads the full game with all systems. Use this after validating basics.
 
+## Log File Locations
+
+All logs are written to:
+- **Linux:** `~/.local/share/godot/app_userdata/Movement Dojo XR/logs/engine.log`
+- **Windows:** `%APPDATA%/Godot/app_userdata/Movement Dojo XR/logs/engine.log`
+- **macOS:** `~/Library/Application Support/Godot/app_userdata/Movement Dojo XR/logs/engine.log`
+
+Log rotation keeps the last 3 sessions (engine.log.1, engine.log.2, engine.log.3).
+
+## Quick Reference
+
+| Command | Purpose | Pass Criteria |
+|---------|---------|---------------|
+| `godot --vr-diagnostics` | Automated XR validation | "PASS" message, exit code 0 |
+| `godot --vr-smoke-test` | Visual/tracking verification | See floor, weapons, stable tracking |
+| `godot --dojo-level1` | Level 1 training flow | Preflight PASS, completes all 5 states, shows summary |
+| `godot` | Full game launch | No errors, enters menu state |
+
+### Alternative Launch Methods
+
+Level 1 can also be started via:
+- Short flag: `godot --level1`
+- Config entry (future): `"mode": "dojo_level1"` in settings.json
+
+All modes use the same hardened OpenXR startup sequence with graceful fallback.
+
+## Troubleshooting Common Issues
+
+### Level 1 Preflight Failures
+
+If Level 1 aborts with "Preflight checks failed":
+
+```
+[Level1] Level 1 aborted: Preflight checks failed
+[Level1] Check configuration/assets/XR runtime.
+```
+
+**Check the specific failure:**
+1. **OpenXR initialization failed** → SteamVR not running or not set as active runtime
+2. **XR session not valid** → HMD not detected, try restarting VR
+3. **Input bindings missing** → Check openxr_action_map.tres exists
+4. **Assets missing** → Non-critical warnings, level will continue
+
+**Quick fix sequence:**
 ```bash
-python tools/dojo_cli.py info
+# 1. Verify XR is working
+godot --vr-diagnostics
+
+# 2. If that passes, try smoke test
+godot --vr-smoke-test
+
+# 3. Then retry Level 1
+godot --dojo-level1
 ```
 
-## CI/CD Integration
-
-### GitHub Actions Example
-
-```yaml
-name: Tests
-
-on: [push, pull_request]
-
-jobs:
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Download Godot
-        run: |
-          wget -q https://downloads.tuxfamily.org/godotengine/4.2.2/Godot_v4.2.2-stable_linux.x86_64.zip
-          unzip -q Godot_v4.2.2-stable_linux.x86_64.zip
-          chmod +x Godot_v4.2.2-stable_linux.x86_64
-
-      - name: Run tests
-        run: |
-          ./Godot_v4.2.2-stable_linux.x86_64 --headless \
-            --path godot_project \
-            --script res://tests/test_runner.gd
-
-      - name: Validate scripts
-        run: python tools/dojo_cli.py validate --scripts
+### "OpenXR interface not found"
+```
+Fix: Set SteamVR as active OpenXR runtime
+1. Open SteamVR Settings
+2. Go to Developer tab
+3. Click "Set SteamVR as OpenXR Runtime"
+4. Restart Virtual Desktop on Quest
 ```
 
-## Core Systems Tested
-
-### MovementFrame
-
-Tests for the frame capture data structure:
-
-- **Creation**: Timestamp, delta, positions correctly stored
-- **Velocity Computation**: Linear velocity from position delta
-- **Angular Velocity**: Quaternion difference to angular velocity
-- **Derived Metrics**: Reach distance, height relative to head
-- **Serialization**: to_dict() / from_dict() round-trip
-
-### MovementSpaceMap
-
-Tests for the 3D movement coverage grid:
-
-- **Grid Math**: Cell coordinate conversions, index calculations
-- **Recording**: New cell detection, visit counting
-- **Coverage**: Percentage calculation, hand-specific coverage
-- **Symmetry**: Left/right balance scoring
-- **Directional Coverage**: Zone categorization (overhead, front, etc.)
-
-### ScoreManager
-
-Tests for the scoring/combo system:
-
-- **Combo Multiplier**: Threshold-based multiplier tiers
-- **Combo Bonus**: End-of-combo bonus calculation
-- **Point Calculation**: With combo and base multipliers
-- **Accuracy**: Hit/miss percentage
-- **Hit Registration**: Points for hits, destruction, perfect swings
-- **Deflection Scoring**: Deflection and deflect-kill points
-
-### ProprioceptionSystem
-
-Tests for position tracking math:
-
-- **Position Deviation**: Distance from target
-- **Rotation Deviation**: Angular difference
-- **Tolerance Checking**: Within/outside tolerance
-- **Accuracy from Deviation**: Percentage calculation
-- **Position Adjustment**: Scale for player height
-
-### HapticPatterns
-
-Tests for haptic feedback patterns:
-
-- **Pattern Structure**: Required fields present
-- **Amplitude Bounds**: 0.0 to 1.0 range
-- **Duration**: Positive values
-- **Frequency**: Reasonable Hz range
-- **Velocity Intensity**: Speed-based intensity mapping
-
-## Debugging Test Failures
-
-### 1. Run Single Suite
-
-Edit `test_runner.gd` temporarily:
-
-```gdscript
-func _run_all_tests() -> void:
-    # Comment out other suites
-    _run_suite("MovementFrame", TestMovementFrame.run_all())
-    # _run_suite("ScoreSystem", TestScoreSystem.run_all())
+### "HMD not detected"
+```
+Fix: Ensure Virtual Desktop is streaming
+1. Put on Quest headset
+2. Launch Virtual Desktop
+3. Connect to PC
+4. Launch SteamVR from VD Games tab
+5. Retry test
 ```
 
-### 2. Add Debug Output
-
-In test class:
-
-```gdscript
-static func _test_something() -> Array[Dictionary]:
-    var results: Array[Dictionary] = []
-
-    var value := compute_something()
-    print("DEBUG: value = ", value)  # Temporary debug
-
-    results.append(_eq(value, expected, "test_name"))
-    return results
+### Controllers not tracked
+```
+Fix: Check controller bindings
+1. In SteamVR, open Controller Settings
+2. Verify Quest 3 controllers are listed
+3. Check for binding conflicts
+4. Look for "LeftHandPose/RightHandPose not tracked" warnings in log
 ```
 
-### 3. Run Interactively
+### Poor performance / stuttering
+```
+Fix: Check Virtual Desktop settings
+1. In VD Settings, try:
+   - Lower streaming resolution
+   - Enable HEVC encoding
+   - Use 5GHz WiFi or wired connection
+2. Close other GPU-intensive applications
+```
 
+## Exit Codes
+
+| Code | Meaning |
+|------|---------|
+| 0 | Success / Clean exit |
+| 1 | Failure / Error during operation |
+
+Use exit codes for CI/automation:
 ```bash
-# Run with verbose Godot output
-godot --headless --verbose --script res://tests/test_runner.gd
+godot --vr-diagnostics && echo "VR Ready" || echo "VR Failed"
 ```
-
-## Test Coverage Goals
-
-| System | Coverage Goal | Current |
-|--------|---------------|---------|
-| MovementFrame | >90% | ~85% |
-| MovementSpaceMap | >90% | ~80% |
-| ScoreManager | >95% | ~90% |
-| ProprioceptionSystem | >80% | ~70% |
-| HapticPatterns | >80% | ~75% |
-| Serialization | >95% | ~90% |
-| Integration | >70% | ~60% |
-
-## Best Practices
-
-1. **Test Pure Functions First**: Start with math/calculation tests
-2. **Avoid External Dependencies**: Tests should not require XR hardware
-3. **Use Deterministic Data**: Avoid randomness in tests
-4. **Test Edge Cases**: Zero values, negative values, max values
-5. **Test Serialization**: Every data class should round-trip correctly
-6. **Keep Tests Fast**: Target <5 seconds for full suite
-7. **Name Tests Clearly**: Test name should describe expected behavior

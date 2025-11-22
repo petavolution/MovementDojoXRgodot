@@ -101,38 +101,76 @@ cd godot_project
 godot --dojo-level1
 ```
 
+Level 1 uses the same hardened OpenXR startup as diagnostics/smoke test, with additional
+preflight checks for assets and input bindings.
+
 **Expected in HMD:**
-- Same dojo environment as smoke test (floor, pillars, back wall)
-- Right hand: Debug saber (trigger to activate)
+- Octagonal dojo environment with dark walls and blue accent lighting
+- Right hand: Debug saber with cyan glowing blade (always active in Level 1)
 - Left hand: Debug blaster
-- Voice/text prompts guiding through training phases
+- Floating 3D text prompts guiding through training phases
+- Visual feedback: "BLOCKED!", "HIT!", "DESTROYED!", etc.
 
 **Training Flow (State Machine):**
-1. **INTRO** (~5s): Welcome message, show controls
-2. **SABER_DRILL** (~15s): Practice saber activation and swings
-3. **BLASTER_DRILL** (~15s): Practice blaster aiming
-4. **MIXED_DRILL** (~15s): Combined combat practice
-5. **SUMMARY**: Display session stats (hits, time, etc.)
+1. **INTRO** (~10s): Welcome message, controls overview, "Relax and enjoy the chilled training"
+2. **SABER_DRILL**: Block slow-moving projectiles with saber (3 required)
+   - Slow projectiles (2 m/s) from stationary drone
+   - Visual feedback on successful blocks
+3. **BLASTER_DRILL**: Destroy stationary targets with blaster (4 required)
+   - Targets spawn at comfortable range
+   - Track hits and accuracy
+4. **MIXED_DRILL**: Combined combat with drones and one dive attack
+   - Destroy drones while blocking projectiles
+   - One clearly telegraphed dive attack (⚠️ DIVE ATTACK! warning)
+   - Evade or block the dive
+5. **SUMMARY**: Display session stats in floating panel
+   - Total duration, blocks, hits, drones destroyed
+   - Dive attack result (evaded/hit)
 
-**Expected in Log:**
+**Expected in Log (preflight + phases):**
 ```
+[Level1] === DOJO LEVEL 1 ===
+[Level1] Starting Level 1 dojo experience (chilled training mode)
+[Level1] Running preflight checks...
+[Level1]   [1/4] OpenXR initialization...
+[Level1]   PASS: OpenXR initialized
+[Level1]   [2/4] XR session validation...
+[Level1]   PASS: XR session valid
+[Level1]   [3/4] Input binding verification...
+[Level1]   PASS: Input bindings configured
+[Level1]   [4/4] Optional asset check...
+[Level1] Preflight checks: ALL PASSED
 [Level1] State: IDLE → INTRO
 [Level1] State: INTRO → SABER_DRILL
-...
-[Level1] Level complete. Stats: {...}
+[Level1] State: SABER_DRILL → BLASTER_DRILL
+[Level1] State: BLASTER_DRILL → MIXED_DRILL
+[Level1] State: MIXED_DRILL → SUMMARY
+[Level1] === LEVEL 1 SUMMARY ===
+[Level1] Level 1 completed successfully
 ```
 
 **Test Actions:**
-1. Follow the training prompts in each phase
-2. Pull right trigger to activate saber
-3. Pull left trigger to fire blaster
-4. Observe state transitions in log
-5. Press menu button or ESC to exit cleanly
+1. Put on headset and verify you're in the octagonal dojo
+2. Read the floating intro text
+3. **SABER_DRILL**: Block 3 slow projectiles with your saber
+4. **BLASTER_DRILL**: Shoot 4 targets with your blaster (left trigger)
+5. **MIXED_DRILL**: Destroy drones and watch for "DIVE ATTACK!" warning
+6. **SUMMARY**: Review your stats in the floating panel
+7. Press menu button or ESC to exit cleanly
+
+**Key Characteristics (Chilled Mode):**
+- Slow projectiles (2 m/s) - easy to track and block
+- Few drones (1-2 at a time)
+- Clearly telegraphed dive attack with 1.2s warning
+- Generous hit detection
+- No time pressure on drills
 
 **If Issues:**
-- State not advancing → Check Level1Controller logs for timer issues
-- Weapons not visible → Verify XR controller tracking
-- Immediate exit → Check for XR initialization failure in log
+- "Preflight checks failed" → Check log for specific FAIL message
+- State not advancing → Check for timer or spawner issues in log
+- No visual feedback → Verify Level1Feedback is created
+- Immediate exit → Look for "Level 1 aborted" in log with reason
+- Dive attack not appearing → Check Level1DroneSpawner logs
 
 ## Step 4: Normal Launch (Optional)
 
@@ -160,10 +198,45 @@ Log rotation keeps the last 3 sessions (engine.log.1, engine.log.2, engine.log.3
 |---------|---------|---------------|
 | `godot --vr-diagnostics` | Automated XR validation | "PASS" message, exit code 0 |
 | `godot --vr-smoke-test` | Visual/tracking verification | See floor, weapons, stable tracking |
-| `godot --dojo-level1` | Level 1 training flow | Completes all 5 states, shows summary |
+| `godot --dojo-level1` | Level 1 training flow | Preflight PASS, completes all 5 states, shows summary |
 | `godot` | Full game launch | No errors, enters menu state |
 
+### Alternative Launch Methods
+
+Level 1 can also be started via:
+- Short flag: `godot --level1`
+- Config entry (future): `"mode": "dojo_level1"` in settings.json
+
+All modes use the same hardened OpenXR startup sequence with graceful fallback.
+
 ## Troubleshooting Common Issues
+
+### Level 1 Preflight Failures
+
+If Level 1 aborts with "Preflight checks failed":
+
+```
+[Level1] Level 1 aborted: Preflight checks failed
+[Level1] Check configuration/assets/XR runtime.
+```
+
+**Check the specific failure:**
+1. **OpenXR initialization failed** → SteamVR not running or not set as active runtime
+2. **XR session not valid** → HMD not detected, try restarting VR
+3. **Input bindings missing** → Check openxr_action_map.tres exists
+4. **Assets missing** → Non-critical warnings, level will continue
+
+**Quick fix sequence:**
+```bash
+# 1. Verify XR is working
+godot --vr-diagnostics
+
+# 2. If that passes, try smoke test
+godot --vr-smoke-test
+
+# 3. Then retry Level 1
+godot --dojo-level1
+```
 
 ### "OpenXR interface not found"
 ```

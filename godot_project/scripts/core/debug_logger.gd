@@ -36,8 +36,12 @@ func _ready() -> void:
 
 	# Log system info
 	info("DebugLogger", "Logging initialized")
+	info("DebugLogger", "Log file: %s" % _log_path)
 	info("DebugLogger", "Godot version: %s" % Engine.get_version_info().string)
 	info("DebugLogger", "OS: %s" % OS.get_name())
+
+	# Validate autoloads after a short delay (to allow all to initialize)
+	call_deferred("_validate_startup")
 
 
 func _exit_tree() -> void:
@@ -266,3 +270,25 @@ func _generate_session_id() -> String:
 		datetime.year, datetime.month, datetime.day,
 		datetime.hour, datetime.minute, datetime.second
 	]
+
+
+## Validate startup state - called deferred after all autoloads initialize
+func _validate_startup() -> void:
+	var required_autoloads := ["GameEvents", "XRInputManager", "MovementTracker", "SessionManager"]
+	var missing: Array[String] = []
+
+	for autoload_name in required_autoloads:
+		if not get_node_or_null("/root/%s" % autoload_name):
+			missing.append(autoload_name)
+
+	if missing.is_empty():
+		info("DebugLogger", "Startup validation: All %d autoloads OK" % required_autoloads.size())
+	else:
+		error("DebugLogger", "Startup validation FAILED - Missing autoloads: %s" % ", ".join(missing))
+
+	# Log XR availability
+	var xr_interface := XRServer.find_interface("OpenXR")
+	if xr_interface:
+		info("DebugLogger", "XR Interface: OpenXR available")
+	else:
+		warn("DebugLogger", "XR Interface: OpenXR not available (desktop mode)")

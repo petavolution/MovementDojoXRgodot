@@ -50,8 +50,8 @@ var boundary_points: PackedVector3Array = []
 var boundary_center: Vector3 = Vector3.ZERO
 var play_area_size: Vector2 = Vector2.ZERO
 
-## References
-var xr_session: XRSessionManager
+## References (set via setup_xr_nodes)
+var xr_origin: XROrigin3D
 var xr_camera: XRCamera3D
 var left_controller: XRController3D
 var right_controller: XRController3D
@@ -73,25 +73,56 @@ func _ready() -> void:
 	_create_warning_overlay()
 
 
-func setup(session: XRSessionManager) -> void:
-	xr_session = session
+## Setup with XR origin to get boundary data directly from OpenXR
+func setup(origin: XROrigin3D, camera: XRCamera3D, left: XRController3D, right: XRController3D) -> void:
+	xr_origin = origin
+	xr_camera = camera
+	left_controller = left
+	right_controller = right
+	prev_head_pos = camera.global_position if camera else Vector3.ZERO
 
-	if xr_session:
-		xr_session.bounds_changed.connect(_on_bounds_changed)
-
-		# Get initial bounds
-		boundary_points = xr_session.stage_bounds
-		boundary_center = xr_session.play_area_center
-		play_area_size = xr_session.runtime_info.play_area_size
-
-		_update_boundary_mesh()
+	# Get boundary data from XR interface
+	_refresh_boundary_data()
 
 
+## Legacy compatibility - use setup() instead
 func setup_xr_nodes(camera: XRCamera3D, left: XRController3D, right: XRController3D) -> void:
 	xr_camera = camera
 	left_controller = left
 	right_controller = right
 	prev_head_pos = camera.global_position if camera else Vector3.ZERO
+
+
+## Refresh boundary data from OpenXR runtime
+func _refresh_boundary_data() -> void:
+	var xr_interface := XRServer.primary_interface
+	if xr_interface == null:
+		return
+
+	# OpenXR provides play area bounds via get_play_area()
+	if xr_interface.has_method("get_play_area"):
+		var play_area: PackedVector3Array = xr_interface.get_play_area()
+		if play_area.size() > 0:
+			boundary_points = play_area
+			_calculate_center_and_size()
+			_update_boundary_mesh()
+
+
+func _calculate_center_and_size() -> void:
+	if boundary_points.is_empty():
+		return
+
+	var min_pos := boundary_points[0]
+	var max_pos := boundary_points[0]
+
+	for point in boundary_points:
+		min_pos.x = min(min_pos.x, point.x)
+		min_pos.z = min(min_pos.z, point.z)
+		max_pos.x = max(max_pos.x, point.x)
+		max_pos.z = max(max_pos.z, point.z)
+
+	boundary_center = (min_pos + max_pos) / 2.0
+	play_area_size = Vector2(max_pos.x - min_pos.x, max_pos.z - min_pos.z)
 
 
 func activate() -> void:

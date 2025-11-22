@@ -7,6 +7,7 @@
 3. **Clear Flow** - Predictable initialization sequence
 4. **Loose Coupling** - Signal-based communication via GameEvents
 5. **Testable** - Core logic separable from XR runtime
+6. **Debug First** - Centralized logging to file for troubleshooting
 
 ## System Tiers
 
@@ -15,13 +16,14 @@ These systems are required for basic application function:
 
 | System | Purpose | Dependencies |
 |--------|---------|--------------|
-| `GameEvents` | Signal bus | None |
-| `MovementTracker` | XR data capture | GameEvents |
-| `SessionManager` | Data persistence | MovementTracker, GameEvents |
-| `XRInputManager` | Controller input | GameEvents |
+| `Logger` | Debug output to file | None (loads first) |
+| `GameEvents` | Signal bus | Logger |
+| `XRInputManager` | Controller input | Logger |
+| `MovementTracker` | XR data capture | Logger, GameEvents |
+| `SessionManager` | Data persistence | Logger, MovementTracker, GameEvents |
 
-### Tier 2: Core Gameplay (Scene-based)
-Instantiated by main scene, not autoloads:
+### Tier 2: Core Gameplay (Lazy-loaded via SystemsManager)
+Instantiated by main scene when needed:
 
 | System | Purpose | Loaded When |
 |--------|---------|-------------|
@@ -47,22 +49,28 @@ Application Start
     ▼
 ┌─────────────────────────────────────┐
 │  1. Godot Autoloads (in order)      │
+│     • Logger (DebugLogger)          │
 │     • GameEvents                    │
+│     • XRInputManager                │
 │     • MovementTracker               │
 │     • SessionManager                │
-│     • XRInputManager                │
 └─────────────────────────────────────┘
     │
     ▼
 ┌─────────────────────────────────────┐
 │  2. Main Scene (_ready)             │
+│     • Create SystemsManager         │
+│     • _setup_optional_nodes()       │
+│       - Get references to sabers    │
+│       - Get visualization nodes     │
 │     • _initialize_xr()              │
 │       - Find OpenXR interface       │
 │       - Initialize XR viewport      │
-│       - Set physics rate            │
+│       - Set physics rate to 90Hz    │
 │     • _setup_controllers()          │
 │       - Link XR nodes to tracker    │
 │       - Configure HUD references    │
+│       - Connect controller signals  │
 │     • _connect_signals()            │
 │       - Wire GameEvents handlers    │
 │     • _change_state(MENU)           │
@@ -117,18 +125,28 @@ godot_project/
 └── resources/                 # Assets
 ```
 
-## Simplified project.godot Autoloads
+## project.godot Autoloads
 
 ```ini
 [autoload]
+; Essential systems only (loaded in dependency order)
+; DebugLogger FIRST - captures all errors/debug output to file
+Logger="*res://scripts/core/debug_logger.gd"
+; GameEvents - signal bus with no dependencies
 GameEvents="*res://scripts/core/game_events.gd"
-MovementTracker="*res://scripts/core/movement_tracker.gd"
-SessionManager="*res://scripts/core/session_manager.gd"
+; XRInputManager - controller input handling
 XRInputManager="*res://scripts/core/xr_input_manager.gd"
+; MovementTracker - XR data capture (depends on GameEvents)
+MovementTracker="*res://scripts/core/movement_tracker.gd"
+; SessionManager - persistence (depends on MovementTracker, GameEvents)
+SessionManager="*res://scripts/core/session_manager.gd"
 ```
 
-*Note: MovementAnalytics, AudioManager, ScoreManager, AdaptiveDifficulty, ReplaySystem
-should be loaded by the main scene when needed, not as autoloads.*
+**Debug Log Location:** `user://debug-log.txt`
+(Typically `~/.local/share/godot/app_userdata/Movement Dojo XR/debug-log.txt`)
+
+*Note: Secondary systems (MovementAnalytics, AudioManager, ScoreManager, etc.)
+are lazy-loaded via SystemsManager when the main scene needs them.*
 
 ## Core Classes
 

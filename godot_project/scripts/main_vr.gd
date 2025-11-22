@@ -32,6 +32,11 @@ var target_spawner: Node3D
 var current_state := GameState.INITIALIZING
 var xr_interface: XRInterface
 var xr_initialized := false
+var desktop_mode := false
+
+# Desktop mode settings
+var mouse_sensitivity := 0.003
+var move_speed := 3.0
 
 # Systems manager (lazy-loads secondary systems)
 var systems: SystemsManager
@@ -79,16 +84,63 @@ func _setup_optional_nodes() -> void:
 	target_spawner = get_node_or_null("TargetSpawner")
 
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
 	if not xr_initialized:
 		return
 
-	# Handle pause
-	if Input.is_action_just_pressed("xr_menu"):
+	# Handle pause (both VR and desktop)
+	if Input.is_action_just_pressed("xr_menu") or (desktop_mode and Input.is_action_just_pressed("ui_accept")):
 		if current_state == GameState.PAUSED:
 			_resume_session()
 		elif current_state != GameState.MENU:
 			_pause_session()
+
+	# Desktop mode controls
+	if desktop_mode:
+		_handle_desktop_input(delta)
+
+
+func _input(event: InputEvent) -> void:
+	# Desktop mouse look
+	if desktop_mode and event is InputEventMouseMotion:
+		if Input.get_mouse_mode() == Input.MOUSE_MODE_CAPTURED:
+			var motion := event as InputEventMouseMotion
+			xr_camera.rotate_y(-motion.relative.x * mouse_sensitivity)
+			xr_camera.rotate_x(-motion.relative.y * mouse_sensitivity)
+			xr_camera.rotation.x = clamp(xr_camera.rotation.x, -PI/2, PI/2)
+
+	# Toggle mouse capture
+	if event.is_action_pressed("ui_cancel"):
+		if Input.get_mouse_mode() == Input.MOUSE_MODE_CAPTURED:
+			Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
+		else:
+			Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
+
+
+func _handle_desktop_input(delta: float) -> void:
+	# WASD movement
+	var input_dir := Vector3.ZERO
+	if Input.is_key_pressed(KEY_W):
+		input_dir.z -= 1
+	if Input.is_key_pressed(KEY_S):
+		input_dir.z += 1
+	if Input.is_key_pressed(KEY_A):
+		input_dir.x -= 1
+	if Input.is_key_pressed(KEY_D):
+		input_dir.x += 1
+
+	if input_dir != Vector3.ZERO:
+		input_dir = input_dir.normalized()
+		var direction := xr_camera.global_transform.basis * input_dir
+		direction.y = 0
+		direction = direction.normalized()
+		xr_origin.global_position += direction * move_speed * delta
+
+	# Simulate hand positions for testing (follows camera)
+	if left_controller:
+		left_controller.global_position = xr_camera.global_position + xr_camera.global_transform.basis * Vector3(-0.3, -0.2, -0.4)
+	if right_controller:
+		right_controller.global_position = xr_camera.global_position + xr_camera.global_transform.basis * Vector3(0.3, -0.2, -0.4)
 
 
 func _initialize_xr() -> void:
@@ -120,7 +172,16 @@ func _initialize_xr() -> void:
 
 func _fallback_to_desktop() -> void:
 	DebugLogger.warn(SOURCE, "Running in desktop mode (no VR)")
-	# Could add mouse/keyboard controls here for testing
+	desktop_mode = true
+	xr_initialized = true  # Allow _process to run
+
+	# Enable mouse capture for FPS-style controls
+	Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
+
+	# Disable XR viewport mode
+	get_viewport().use_xr = false
+
+	DebugLogger.info(SOURCE, "Desktop controls: WASD=move, Mouse=look, ESC=release mouse, Space=menu")
 
 
 func _setup_controllers() -> void:

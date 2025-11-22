@@ -73,6 +73,10 @@ var _message_count: int = 0
 # Buffer for early messages (before file is ready)
 var _early_buffer: Array[String] = []
 
+# Auto-flush timer (for crash recovery)
+var _auto_flush_timer: float = 0.0
+const AUTO_FLUSH_INTERVAL := 5.0  # Flush every 5 seconds for VR crash recovery
+
 # XR diagnostic cache
 var _xr_diagnostic_cache: Dictionary = {}
 
@@ -99,9 +103,18 @@ func _ready() -> void:
 		_level_to_string(_config.file_log_level),
 		_level_to_string(_config.console_log_level)
 	])
+	info("Engine", "Auto-flush interval: %.1fs (crash recovery)" % AUTO_FLUSH_INTERVAL)
 
 	# Deferred startup validation (after all autoloads)
 	call_deferred("_run_startup_diagnostics")
+
+
+func _process(delta: float) -> void:
+	# Periodic auto-flush for crash recovery (ensures logs survive VR crashes)
+	_auto_flush_timer += delta
+	if _auto_flush_timer >= AUTO_FLUSH_INTERVAL:
+		_auto_flush_timer = 0.0
+		_flush()
 
 
 func _exit_tree() -> void:

@@ -56,18 +56,53 @@ func _ready() -> void:
 		_abort_with_error("Preflight checks failed")
 		return
 
-	# Build scene
+	# Build scene with validation
+	DebugLogger.info(SOURCE, "Building scene components...")
 	_build_xr_scene()
+	if not _validate_xr_scene():
+		_abort_with_error("XR scene validation failed")
+		return
+
 	_build_environment()
 	_build_entities_container()
 	_build_feedback_ui()
 	_build_sequence_controller()
 
+	# Validate critical components
+	if sequence_controller == null:
+		DebugLogger.error(SOURCE, "CRITICAL: Sequence controller not created")
+		_abort_with_error("Sequence controller creation failed")
+		return
+
 	# Load and start sequence
 	_load_and_start_sequence()
 
 	is_initialized = true
-	DebugLogger.info(SOURCE, "Training sequence scene initialized")
+	DebugLogger.info(SOURCE, "Training sequence scene initialized successfully")
+	DebugLogger.info(SOURCE, "Ready for VR training!")
+	DebugLogger.flush()  # Ensure initialization is logged before VR starts
+
+
+## Validate XR scene was built correctly
+func _validate_xr_scene() -> bool:
+	var valid := true
+
+	if xr_origin == null:
+		DebugLogger.error(SOURCE, "CRITICAL: XROrigin3D not created")
+		valid = false
+	if xr_camera == null:
+		DebugLogger.error(SOURCE, "CRITICAL: XRCamera3D not created")
+		valid = false
+
+	# Controllers are expected but not strictly required
+	if left_controller == null:
+		DebugLogger.warn(SOURCE, "Left controller not created")
+	if right_controller == null:
+		DebugLogger.warn(SOURCE, "Right controller not created")
+
+	if valid:
+		DebugLogger.debug(SOURCE, "XR scene validation passed")
+	return valid
 
 
 func _process(delta: float) -> void:
@@ -91,22 +126,31 @@ func _exit_tree() -> void:
 
 func _run_preflight_checks() -> bool:
 	DebugLogger.info(SOURCE, "Running preflight checks...")
+	DebugLogger.flush()  # Ensure we capture logs even if VR crashes
 
 	# Check 1: OpenXR initialization
-	DebugLogger.info(SOURCE, "  [1/3] OpenXR initialization...")
+	DebugLogger.info(SOURCE, "  [1/4] OpenXR initialization...")
 	xr_interface = XRServer.find_interface("OpenXR")
 	if xr_interface == null:
 		DebugLogger.error(SOURCE, "  FAIL: OpenXR interface not found")
+		DebugLogger.error(SOURCE, "  Check: Is SteamVR running and set as active OpenXR runtime?")
+		DebugLogger.flush()
 		return false
 
 	if not xr_interface.is_initialized():
-		if not xr_interface.initialize():
+		DebugLogger.info(SOURCE, "  Initializing OpenXR interface...")
+		var init_success := xr_interface.initialize()
+		if not init_success:
 			DebugLogger.error(SOURCE, "  FAIL: OpenXR failed to initialize")
+			DebugLogger.error(SOURCE, "  Check: Is HMD connected via Virtual Desktop?")
+			DebugLogger.error(SOURCE, "  Check: Is SteamVR detecting the Quest 3?")
+			DebugLogger.flush()
 			return false
 	DebugLogger.info(SOURCE, "  PASS: OpenXR initialized")
+	_log_xr_state()
 
 	# Check 2: Sequence exists
-	DebugLogger.info(SOURCE, "  [2/3] Sequence validation...")
+	DebugLogger.info(SOURCE, "  [2/4] Sequence validation...")
 	var available := SequenceLibrary.get_available_sequences()
 	var sequence_exists := false
 	for seq_id in available:
@@ -122,7 +166,7 @@ func _run_preflight_checks() -> bool:
 	DebugLogger.info(SOURCE, "  PASS: Sequence '%s' found" % selected_sequence_id)
 
 	# Check 3: Sequence is valid
-	DebugLogger.info(SOURCE, "  [3/3] Sequence structure check...")
+	DebugLogger.info(SOURCE, "  [3/4] Sequence structure check...")
 	var sequence := SequenceLibrary.get_sequence(selected_sequence_id)
 	if sequence == null:
 		DebugLogger.error(SOURCE, "  FAIL: Could not create sequence")
@@ -136,8 +180,40 @@ func _run_preflight_checks() -> bool:
 		return false
 	DebugLogger.info(SOURCE, "  PASS: Sequence is valid")
 
+	# Check 4: XR session is ready
+	DebugLogger.info(SOURCE, "  [4/4] XR session ready check...")
+	if xr_interface and xr_interface.is_initialized():
+		var refresh := xr_interface.get_display_refresh_rate()
+		if refresh > 0:
+			DebugLogger.info(SOURCE, "  PASS: XR session ready (%.0f Hz)" % refresh)
+		else:
+			DebugLogger.warn(SOURCE, "  WARN: Refresh rate unknown, continuing anyway")
+	else:
+		DebugLogger.error(SOURCE, "  FAIL: XR interface lost during preflight")
+		return false
+
 	DebugLogger.info(SOURCE, "Preflight checks: ALL PASSED")
+	DebugLogger.flush()  # Ensure preflight results are saved
 	return true
+
+
+## Log current XR system state for debugging
+func _log_xr_state() -> void:
+	if xr_interface == null:
+		DebugLogger.warn(SOURCE, "  XR State: Interface is null")
+		return
+
+	DebugLogger.info(SOURCE, "  XR State:")
+	DebugLogger.info(SOURCE, "    Interface: %s" % xr_interface.get_name())
+	DebugLogger.info(SOURCE, "    Initialized: %s" % xr_interface.is_initialized())
+
+	var refresh := xr_interface.get_display_refresh_rate()
+	if refresh > 0:
+		DebugLogger.info(SOURCE, "    Refresh Rate: %.0f Hz" % refresh)
+
+	var render_size := xr_interface.get_render_target_size()
+	if render_size.x > 0:
+		DebugLogger.info(SOURCE, "    Render Size: %dx%d per eye" % [int(render_size.x), int(render_size.y)])
 
 
 # =============================================================================

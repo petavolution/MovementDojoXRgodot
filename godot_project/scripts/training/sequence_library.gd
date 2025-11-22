@@ -79,6 +79,7 @@ static func _create_level1_intro() -> TrainingPhase:
 	phase.phase_type = TrainingPhase.PhaseType.INTRO
 
 	phase.objective_text = "Prepare for training"
+	phase.hint_text = "Take a moment to adjust your grip and stance"
 	phase.intro_message = "Welcome to the Dojo! Relax and prepare for your training."
 	phase.success_message = "Let's begin!"
 

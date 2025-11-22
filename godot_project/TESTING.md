@@ -200,6 +200,7 @@ Log rotation keeps the last 3 sessions (engine.log.1, engine.log.2, engine.log.3
 | `godot --vr-smoke-test` | Visual/tracking verification | See floor, weapons, stable tracking |
 | `godot --dojo-level1` | Level 1 training flow | Preflight PASS, completes all 5 states, shows summary |
 | `godot --training-sequence=level1` | Data-driven Level 1 | Sequence loads, phases execute, summary shown |
+| `godot --training-sequence=level1 --training-debug` | Debug mode | Debug keyboard shortcuts enabled |
 | `godot` | Full game launch | No errors, enters menu state |
 
 ### Alternative Launch Methods
@@ -280,9 +281,59 @@ TrainingSequence (e.g., "Level 1")
 [TrnSeqCtrl] === PHASE 1/5: Welcome ===
 [TrnSeqCtrl] === PHASE 2/5: Saber Basics ===
 [TrnSeqCtrl] Wave 1/1: saber_w1 - 2x Flying Drone (stationary, shooting)
-[TrnSeqCtrl] Wave completed: saber_w1 (success=true)
+[TrnSeqCtrl] Wave completed: saber_w1 (success=true) - Rating: ★★★
 [TrnSeqCtrl] ═══ SEQUENCE COMPLETE! ═══
+[TrnSeqCtrl] TrainingSequenceSummary: sequence='level1_fundamentals', totalWaves=3, totalScore=9, totalHitsTaken=0, duration=45.2
 ```
+
+### Debug Mode
+
+Enable debug mode to access keyboard shortcuts for testing and QA:
+
+```bash
+# Enable debug mode with the --training-debug flag
+godot --training-sequence=level1 --training-debug
+```
+
+**Debug Keyboard Controls:**
+| Key | Action |
+|-----|--------|
+| `R` | Restart the current sequence from the beginning |
+| `N` | Skip to the next phase |
+| `W` | Skip the current wave |
+| `1-5` | Jump directly to phase 1, 2, 3, 4, or 5 |
+
+**Debug Log Output:**
+```
+[TrnSeqCtrl] DEBUG MODE ENABLED - Keyboard shortcuts:
+[TrnSeqCtrl]   R = Restart sequence
+[TrnSeqCtrl]   N = Skip to next phase
+[TrnSeqCtrl]   W = Skip current wave
+[TrnSeqCtrl]   1-5 = Jump to phase 1-5
+[TrnSeqCtrl] DEBUG: Skipping to phase 3 (Mixed Combat)
+```
+
+### Wave Rating System
+
+Each wave is rated based on hits taken:
+- **★★★ (3 points)**: No hits taken - Perfect!
+- **★★☆ (2 points)**: 1-2 hits taken - Good
+- **★☆☆ (1 point)**: 3+ hits taken - Cleared
+
+The sequence summary shows your total score and overall rating:
+```
+═══ SCORE ═══
+  Total Score: 8/9 (89%)
+  Overall Rating: ★★★★☆
+```
+
+### UX Feedback Display
+
+The training system shows real-time feedback:
+- **Phase start**: Shows phase name, objective, and hint text
+- **Wave start**: Shows "Wave X/Y" indicator
+- **Wave complete**: Shows summary with kills/blocks/hits and star rating
+- **Sequence complete**: Shows full stats summary panel
 
 ## Troubleshooting Common Issues
 

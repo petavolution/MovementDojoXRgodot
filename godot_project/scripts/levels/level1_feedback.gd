@@ -170,6 +170,11 @@ func show_dive_evaded_feedback() -> void:
 	show_feedback("EVADED!", success_color, 44)
 
 
+## Generic quick feedback (alias for show_feedback with default size)
+func show_quick_feedback(text: String, color: Color = Color.WHITE) -> void:
+	show_feedback(text, color, 38)
+
+
 # =============================================================================
 # PROGRESS FEEDBACK
 # =============================================================================
@@ -179,6 +184,39 @@ func show_progress(current: int, total: int, action: String) -> void:
 	var text := "%d/%d %s" % [current, total, action]
 	var color := info_color if current < total else success_color
 	show_feedback(text, color, 32)
+
+
+## Show wave info (e.g., "Wave 2/3")
+func show_wave_info(wave_index: int, total_waves: int, wave_name: String = "") -> void:
+	var text := "Wave %d/%d" % [wave_index + 1, total_waves]
+	if wave_name != "":
+		text += " - %s" % wave_name
+	show_feedback(text, info_color, 34)
+
+
+## Show wave completion summary
+func show_wave_summary(kills: int, blocks: int, hits_taken: int, rating: int) -> void:
+	var rating_stars := ""
+	for i in range(rating):
+		rating_stars += "★"
+	for i in range(3 - rating):
+		rating_stars += "☆"
+
+	var summary_parts := []
+	if kills > 0:
+		summary_parts.append("%d killed" % kills)
+	if blocks > 0:
+		summary_parts.append("%d blocked" % blocks)
+	if hits_taken > 0:
+		summary_parts.append("%d hits" % hits_taken)
+
+	var text := "Wave cleared! "
+	if summary_parts.size() > 0:
+		text += ", ".join(summary_parts)
+	text += "\n%s" % rating_stars
+
+	var color := success_color if hits_taken == 0 else (warning_color if hits_taken <= 2 else danger_color)
+	show_feedback(text, color, 36)
 
 
 ## Show completion message

@@ -562,6 +562,12 @@ static func has_headless_flag() -> bool:
 	return "--headless" in args
 
 
+## Check if --training-debug flag is present (enables debug controls)
+static func has_training_debug_flag() -> bool:
+	var args := OS.get_cmdline_args()
+	return "--training-debug" in args or "-training-debug" in args
+
+
 ## Get diagnostic timeout from command line (default 5 seconds)
 static func get_diagnostic_timeout_ms() -> int:
 	var args := OS.get_cmdline_args()

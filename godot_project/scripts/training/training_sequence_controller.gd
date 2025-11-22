@@ -101,6 +101,27 @@ var wave_projectiles_blocked := 0
 var wave_hits_landed := 0
 
 # =============================================================================
+# WAVE RATING
+# =============================================================================
+
+## Wave rating thresholds
+const RATING_PERFECT_HITS := 0        # 3 stars: no hits taken
+const RATING_GOOD_HITS_THRESHOLD := 2 # 2 stars: up to 2 hits
+## Anything more: 1 star
+
+## Cumulative scores
+var total_score := 0
+var total_waves_completed := 0
+var total_hits_taken := 0
+
+# =============================================================================
+# DEBUG MODE
+# =============================================================================
+
+## Whether debug mode is enabled (allows keyboard controls)
+var debug_mode := false
+
+# =============================================================================
 # DEPENDENCIES
 # =============================================================================
 
@@ -133,6 +154,10 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
+	# Handle debug input even when not running
+	if debug_mode:
+		_process_debug_input()
+
 	if state != ControllerState.RUNNING:
 		return
 
@@ -357,6 +382,100 @@ func get_progress() -> Dictionary:
 ## Check if controller is currently running
 func is_running() -> bool:
 	return state == ControllerState.RUNNING
+
+
+## Enable debug mode (allows keyboard controls for testing)
+func enable_debug_mode() -> void:
+	debug_mode = true
+	DebugLogger.info(SOURCE, "DEBUG MODE ENABLED - Keyboard shortcuts:")
+	DebugLogger.info(SOURCE, "  R = Restart sequence")
+	DebugLogger.info(SOURCE, "  N = Skip to next phase")
+	DebugLogger.info(SOURCE, "  W = Skip current wave")
+	DebugLogger.info(SOURCE, "  1-5 = Jump to phase 1-5")
+
+
+## Disable debug mode
+func disable_debug_mode() -> void:
+	debug_mode = false
+	DebugLogger.info(SOURCE, "DEBUG MODE DISABLED")
+
+
+## Process debug keyboard input
+func _process_debug_input() -> void:
+	# R = Restart sequence
+	if Input.is_action_just_pressed("ui_text_backspace") or Input.is_key_pressed(KEY_R):
+		if Input.is_key_pressed(KEY_R) and not Input.is_action_just_pressed("ui_text_backspace"):
+			if state in [ControllerState.RUNNING, ControllerState.PAUSED, ControllerState.COMPLETED, ControllerState.ABORTED]:
+				_debug_restart_sequence()
+
+	# N = Next phase
+	if Input.is_key_pressed(KEY_N):
+		if state == ControllerState.RUNNING:
+			_debug_skip_to_next_phase()
+
+	# W = Skip wave
+	if Input.is_key_pressed(KEY_W):
+		if state == ControllerState.RUNNING and current_wave:
+			_debug_skip_current_wave()
+
+	# 1-5 = Jump to specific phase
+	for i in range(1, 6):
+		if Input.is_key_pressed(KEY_1 + i - 1):
+			if state == ControllerState.RUNNING:
+				_debug_jump_to_phase(i - 1)
+
+
+func _debug_restart_sequence() -> void:
+	DebugLogger.warn(SOURCE, "DEBUG: Restarting sequence")
+	feedback_message.emit("DEBUG: Restarting...", "warning")
+
+	# Abort current run
+	if state in [ControllerState.RUNNING, ControllerState.PAUSED]:
+		abort("debug restart")
+
+	# Reset and restart
+	state = ControllerState.READY
+	_reset_all_stats()
+	start()
+
+
+func _debug_skip_to_next_phase() -> void:
+	if not current_phase:
+		return
+
+	var next_index := current_phase_index + 1
+	if next_index >= active_sequence.phases.size():
+		DebugLogger.warn(SOURCE, "DEBUG: No more phases to skip to")
+		return
+
+	DebugLogger.warn(SOURCE, "DEBUG: Skipping to phase %d (%s)" % [
+		next_index + 1,
+		active_sequence.phases[next_index].display_name
+	])
+	feedback_message.emit("DEBUG: Skipping to next phase", "warning")
+	skip_current_phase()
+
+
+func _debug_skip_current_wave() -> void:
+	DebugLogger.warn(SOURCE, "DEBUG: Skipping wave '%s'" % current_wave.wave_id)
+	feedback_message.emit("DEBUG: Skipping wave", "warning")
+	skip_current_wave()
+
+
+func _debug_jump_to_phase(phase_index: int) -> void:
+	if phase_index < 0 or phase_index >= active_sequence.phases.size():
+		DebugLogger.warn(SOURCE, "DEBUG: Invalid phase index %d" % phase_index)
+		return
+
+	if phase_index == current_phase_index:
+		return  # Already there
+
+	DebugLogger.warn(SOURCE, "DEBUG: Jumping to phase %d (%s)" % [
+		phase_index + 1,
+		active_sequence.phases[phase_index].display_name
+	])
+	feedback_message.emit("DEBUG: Jumping to phase %d" % (phase_index + 1), "warning")
+	skip_to_phase(phase_index)
 
 
 # =============================================================================
@@ -635,11 +754,28 @@ func _complete_wave(success: bool, reason: String) -> void:
 	wave_stats["projectiles_blocked"] = spawner_metrics.get("projectiles_blocked", wave_projectiles_blocked)
 	wave_stats["hits_taken"] = spawner_metrics.get("hits_taken", 0)
 
-	# Log wave completion with metrics
+	# Calculate wave rating (3=perfect, 2=good, 1=cleared)
+	var wave_hits := wave_stats["hits_taken"]
+	var rating := 1  # Default: cleared
+	if wave_hits == RATING_PERFECT_HITS:
+		rating = 3  # Perfect!
+	elif wave_hits <= RATING_GOOD_HITS_THRESHOLD:
+		rating = 2  # Good
+
+	wave_stats["rating"] = rating
+
+	# Update cumulative totals
+	if success:
+		total_waves_completed += 1
+		total_score += rating
+	total_hits_taken += wave_hits
+
+	# Log wave completion with metrics and rating
+	var rating_str := "★★★" if rating == 3 else ("★★☆" if rating == 2 else "★☆☆")
 	DebugLogger.info(SOURCE, "")
 	if success:
-		DebugLogger.info(SOURCE, "Wave '%s' COMPLETED: %s (%.1fs)" % [
-			wave.wave_id, reason, wave_elapsed
+		DebugLogger.info(SOURCE, "Wave '%s' COMPLETED: %s (%.1fs) - Rating: %s" % [
+			wave.wave_id, reason, wave_elapsed, rating_str
 		])
 	else:
 		DebugLogger.warn(SOURCE, "Wave '%s' FAILED: %s (%.1fs)" % [
@@ -653,10 +789,12 @@ func _complete_wave(success: bool, reason: String) -> void:
 		wave_stats["hits_taken"]
 	])
 
-	# Show feedback message
+	# Show feedback message with wave summary
 	if success:
 		if wave.complete_message:
 			feedback_message.emit(wave.complete_message, "success")
+		# Emit wave summary signal for UI
+		_emit_wave_summary(wave_stats)
 		wave_completed.emit(wave, wave_stats.duplicate())
 	else:
 		if wave.timeout_message:
@@ -689,21 +827,75 @@ func _complete_sequence() -> void:
 	_finalize_stats()
 	state = ControllerState.COMPLETED
 
+	# Log detailed summary
+	_log_sequence_summary()
+
+	sequence_completed.emit(active_sequence, sequence_stats.duplicate())
+
+
+## Log structured sequence summary (for logs and analytics)
+func _log_sequence_summary() -> void:
+	var seq_id := active_sequence.sequence_id if active_sequence else "unknown"
+	var display_name := active_sequence.display_name if active_sequence else "Unknown"
+
 	DebugLogger.info(SOURCE, "")
 	DebugLogger.info(SOURCE, "╔═══════════════════════════════════════════════════════════╗")
 	DebugLogger.info(SOURCE, "║              SEQUENCE COMPLETE!                           ║")
 	DebugLogger.info(SOURCE, "╚═══════════════════════════════════════════════════════════╝")
 	DebugLogger.info(SOURCE, "")
-	DebugLogger.info(SOURCE, "Total duration: %.1fs" % sequence_stats["total_duration"])
-	DebugLogger.info(SOURCE, "Phases completed: %d" % sequence_stats["phases_completed"])
+	DebugLogger.info(SOURCE, "Sequence: %s (%s)" % [display_name, seq_id])
+	DebugLogger.info(SOURCE, "")
+	DebugLogger.info(SOURCE, "═══ PERFORMANCE SUMMARY ═══")
+	DebugLogger.info(SOURCE, "  Total Duration: %.1fs" % sequence_stats["total_duration"])
+	DebugLogger.info(SOURCE, "  Phases Completed: %d" % sequence_stats["phases_completed"])
+	DebugLogger.info(SOURCE, "  Waves Completed: %d" % sequence_stats["total_waves"])
+	DebugLogger.info(SOURCE, "")
+	DebugLogger.info(SOURCE, "═══ COMBAT STATS ═══")
+	DebugLogger.info(SOURCE, "  Total Hits Taken: %d" % sequence_stats["total_hits_taken"])
+	DebugLogger.info(SOURCE, "")
+	DebugLogger.info(SOURCE, "═══ SCORE ═══")
+	DebugLogger.info(SOURCE, "  Total Score: %d/%d (%.0f%%)" % [
+		sequence_stats["total_score"],
+		sequence_stats["max_score"],
+		sequence_stats["score_percentage"]
+	])
+
+	# Generate star rating (based on percentage)
+	var pct: float = sequence_stats["score_percentage"]
+	var stars := "★☆☆☆☆"
+	if pct >= 90:
+		stars = "★★★★★"
+	elif pct >= 75:
+		stars = "★★★★☆"
+	elif pct >= 60:
+		stars = "★★★☆☆"
+	elif pct >= 40:
+		stars = "★★☆☆☆"
+
+	DebugLogger.info(SOURCE, "  Overall Rating: %s" % stars)
 	DebugLogger.info(SOURCE, "")
 
-	sequence_completed.emit(active_sequence, sequence_stats.duplicate())
+	# Structured log line for analytics/parsing
+	DebugLogger.info(SOURCE, "TrainingSequenceSummary: sequence='%s', totalWaves=%d, totalScore=%d, totalHitsTaken=%d, duration=%.1f" % [
+		seq_id,
+		sequence_stats["total_waves"],
+		sequence_stats["total_score"],
+		sequence_stats["total_hits_taken"],
+		sequence_stats["total_duration"]
+	])
 
 
 func _finalize_stats() -> void:
 	sequence_stats["total_duration"] = sequence_elapsed
 	sequence_stats["phases_completed"] = current_phase_index + 1 if current_phase_index >= 0 else 0
+	sequence_stats["total_score"] = total_score
+	sequence_stats["total_waves"] = total_waves_completed
+	sequence_stats["total_hits_taken"] = total_hits_taken
+
+	# Calculate max possible score (3 points per wave)
+	var max_score := total_waves_completed * 3
+	sequence_stats["max_score"] = max_score
+	sequence_stats["score_percentage"] = (float(total_score) / float(max(max_score, 1))) * 100.0
 
 
 # =============================================================================
@@ -714,8 +906,14 @@ func _reset_all_stats() -> void:
 	sequence_stats = {
 		"total_duration": 0.0,
 		"phases_completed": 0,
+		"total_score": 0,
+		"total_waves": 0,
+		"total_hits_taken": 0,
 		"phases": {}
 	}
+	total_score = 0
+	total_waves_completed = 0
+	total_hits_taken = 0
 	_reset_phase_stats()
 
 
@@ -797,3 +995,17 @@ func _on_dive_completed(_enemy: Node3D, hit_player: bool) -> void:
 		feedback_message.emit("Dive hit!", "error")
 	else:
 		feedback_message.emit("Dive evaded!", "success")
+
+
+## Emit wave summary for UI display
+func _emit_wave_summary(stats: Dictionary) -> void:
+	# This will be picked up by TrainingSequenceScene to call Level1Feedback.show_wave_summary
+	var kills := stats.get("enemies_destroyed", 0)
+	var blocks := stats.get("projectiles_blocked", 0)
+	var hits := stats.get("hits_taken", 0)
+	var rating := stats.get("rating", 1)
+
+	# Log wave summary line
+	DebugLogger.debug(SOURCE, "WaveSummary: kills=%d, blocks=%d, hits=%d, rating=%d" % [
+		kills, blocks, hits, rating
+	])

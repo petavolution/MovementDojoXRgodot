@@ -231,6 +231,10 @@ func _build_sequence_controller() -> void:
 	sequence_controller.objective_progress.connect(_on_objective_progress)
 	sequence_controller.feedback_message.connect(_on_feedback_message)
 
+	# Enable debug mode if flag is present
+	if XRHelpers.has_training_debug_flag():
+		sequence_controller.enable_debug_mode()
+
 	DebugLogger.debug(SOURCE, "Sequence controller created")
 
 
@@ -294,10 +298,15 @@ func _on_sequence_aborted(sequence: TrainingSequence, reason: String) -> void:
 func _on_phase_started(phase: TrainingPhase, phase_index: int, total_phases: int) -> void:
 	DebugLogger.info(SOURCE, "Phase %d/%d started: %s" % [phase_index + 1, total_phases, phase.display_name])
 
-	if feedback_ui and phase.objective_text:
+	if feedback_ui:
+		# Build instruction text with objective and optional hint
+		var instruction := phase.objective_text if phase.objective_text else phase.description
+		if phase.hint_text and not phase.hint_text.is_empty():
+			instruction += "\n\n💡 %s" % phase.hint_text
+
 		feedback_ui.show_phase_instruction(
 			phase.display_name,
-			phase.objective_text
+			instruction
 		)
 
 
@@ -311,15 +320,28 @@ func _on_phase_completed(phase: TrainingPhase, phase_stats: Dictionary) -> void:
 func _on_wave_started(wave: TrainingWave, wave_index: int, total_waves: int) -> void:
 	DebugLogger.debug(SOURCE, "Wave %d/%d started: %s" % [wave_index + 1, total_waves, wave.wave_id])
 
-	if wave.start_message and feedback_ui:
-		feedback_ui.show_quick_feedback(wave.start_message, Color.WHITE)
+	if feedback_ui:
+		# Show wave number indicator
+		feedback_ui.show_wave_info(wave_index, total_waves, wave.display_name)
+
+		# Show start message if present
+		if wave.start_message:
+			# Small delay so wave info shows first
+			await get_tree().create_timer(0.3).timeout
+			feedback_ui.show_quick_feedback(wave.start_message, Color.WHITE)
 
 
 func _on_wave_completed(wave: TrainingWave, wave_stats: Dictionary) -> void:
-	DebugLogger.debug(SOURCE, "Wave completed: %s (success=%s)" % [
-		wave.wave_id,
-		wave_stats.get("success", false)
-	])
+	var success: bool = wave_stats.get("success", false)
+	DebugLogger.debug(SOURCE, "Wave completed: %s (success=%s)" % [wave.wave_id, success])
+
+	if feedback_ui and success:
+		# Show wave summary with rating
+		var kills := wave_stats.get("enemies_destroyed", 0)
+		var blocks := wave_stats.get("projectiles_blocked", 0)
+		var hits := wave_stats.get("hits_taken", 0)
+		var rating := wave_stats.get("rating", 1)
+		feedback_ui.show_wave_summary(kills, blocks, hits, rating)
 
 
 func _on_objective_progress(current: int, target: int, description: String) -> void:

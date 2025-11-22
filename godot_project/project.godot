@@ -17,7 +17,9 @@ config/icon="res://icon.svg"
 [autoload]
 
 ; Essential systems only (loaded in dependency order)
-; GameEvents first - signal bus with no dependencies
+; DebugLogger FIRST - captures all errors/debug output to file
+Logger="*res://scripts/core/debug_logger.gd"
+; GameEvents - signal bus with no dependencies
 GameEvents="*res://scripts/core/game_events.gd"
 ; XRInputManager - controller input handling
 XRInputManager="*res://scripts/core/xr_input_manager.gd"

@@ -51,6 +51,7 @@ var gesture_confidence_threshold: float = 0.7
 const TRIGGER_THRESHOLD := 0.7
 const GRIP_THRESHOLD := 0.7
 const THUMBSTICK_DEADZONE := 0.15
+const SOURCE := "XRInputManager"
 
 ## Hand joint indices (OpenXR standard)
 enum HandJoint {
@@ -84,6 +85,8 @@ enum HandJoint {
 
 
 func _ready() -> void:
+	DebugLogger.info(SOURCE, "Initializing XRInputManager")
+
 	# Initialize button states
 	for button in ["ax_button", "by_button", "menu_button", "thumbstick_click"]:
 		left_buttons[button] = false
@@ -92,6 +95,8 @@ func _ready() -> void:
 	# Initialize hand joint arrays
 	left_hand_joints.resize(26)
 	right_hand_joints.resize(26)
+
+	DebugLogger.info(SOURCE, "XRInputManager ready")
 
 
 func setup(left_ctrl: XRController3D, right_ctrl: XRController3D) -> void:

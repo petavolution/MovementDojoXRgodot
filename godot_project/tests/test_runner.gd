@@ -2,6 +2,7 @@
 ## Run with: godot --headless --script tests/test_runner.gd
 extends SceneTree
 
+const SOURCE := "TestRunner"
 const EXIT_SUCCESS := 0
 const EXIT_FAILURE := 1
 
@@ -11,18 +12,61 @@ var passed_tests := 0
 var failed_tests := 0
 var current_suite := ""
 
+# Log file for test results
+var _log_file: FileAccess
+var _log_path: String
+
 
 func _init() -> void:
+	# Setup test log file
+	_setup_test_log()
+
 	# Run all tests
-	print("\n" + "=".repeat(60))
-	print("Movement Dojo XR - Test Suite")
-	print("=".repeat(60) + "\n")
+	_log_and_print("\n" + "=".repeat(60))
+	_log_and_print("Movement Dojo XR - Test Suite")
+	_log_and_print("=".repeat(60) + "\n")
 
 	_run_all_tests()
 	_print_summary()
 
+	# Close log file
+	_close_test_log()
+
 	# Exit with appropriate code
 	quit(EXIT_SUCCESS if failed_tests == 0 else EXIT_FAILURE)
+
+
+func _setup_test_log() -> void:
+	var user_dir := OS.get_user_data_dir()
+	_log_path = user_dir + "/test-results.txt"
+
+	# Ensure directory exists
+	DirAccess.make_dir_recursive_absolute(user_dir)
+
+	_log_file = FileAccess.open(_log_path, FileAccess.WRITE)
+	if _log_file:
+		var datetime := Time.get_datetime_dict_from_system()
+		_log_file.store_line("=".repeat(80))
+		_log_file.store_line("TEST RUN: %04d-%02d-%02d %02d:%02d:%02d" % [
+			datetime.year, datetime.month, datetime.day,
+			datetime.hour, datetime.minute, datetime.second
+		])
+		_log_file.store_line("=".repeat(80))
+		_log_file.store_line("")
+
+
+func _close_test_log() -> void:
+	if _log_file:
+		_log_file.store_line("")
+		_log_file.store_line("Log saved to: " + _log_path)
+		_log_file.close()
+		print("Test log saved to: " + _log_path)
+
+
+func _log_and_print(message: String) -> void:
+	print(message)
+	if _log_file:
+		_log_file.store_line(message)
 
 
 func _run_all_tests() -> void:
@@ -43,36 +87,36 @@ func _run_all_tests() -> void:
 
 func _run_suite(name: String, results: Array[Dictionary]) -> void:
 	current_suite = name
-	print("[SUITE] " + name)
+	_log_and_print("[SUITE] " + name)
 
 	for result in results:
 		total_tests += 1
 		if result.passed:
 			passed_tests += 1
-			print("  [PASS] " + result.name)
+			_log_and_print("  [PASS] " + result.name)
 		else:
 			failed_tests += 1
-			print("  [FAIL] " + result.name)
-			print("         Expected: " + str(result.expected))
-			print("         Got:      " + str(result.actual))
+			_log_and_print("  [FAIL] " + result.name)
+			_log_and_print("         Expected: " + str(result.expected))
+			_log_and_print("         Got:      " + str(result.actual))
 			if result.has("message"):
-				print("         Message:  " + result.message)
+				_log_and_print("         Message:  " + result.message)
 
 		test_results.append(result)
 
-	print("")
+	_log_and_print("")
 
 
 func _print_summary() -> void:
-	print("=".repeat(60))
-	print("RESULTS: %d passed, %d failed, %d total" % [passed_tests, failed_tests, total_tests])
-	print("=".repeat(60))
+	_log_and_print("=".repeat(60))
+	_log_and_print("RESULTS: %d passed, %d failed, %d total" % [passed_tests, failed_tests, total_tests])
+	_log_and_print("=".repeat(60))
 
 	if failed_tests > 0:
-		print("\nFailed tests:")
+		_log_and_print("\nFailed tests:")
 		for result in test_results:
 			if not result.passed:
-				print("  - [%s] %s" % [result.suite, result.name])
+				_log_and_print("  - [%s] %s" % [result.suite, result.name])
 
 
 # =============================================================================

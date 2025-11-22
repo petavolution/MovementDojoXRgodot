@@ -2,6 +2,8 @@
 ## Initializes XR, sets up tracking, and manages game state
 extends Node3D
 
+const SOURCE := "MainVR"
+
 enum GameState {
 	INITIALIZING,
 	MENU,
@@ -36,27 +38,33 @@ var systems: SystemsManager
 
 
 func _ready() -> void:
-	print("[MainVR] Starting initialization...")
+	DebugLogger.info(SOURCE, "=== Starting initialization ===")
 
 	# 1. Setup systems manager first (for lazy-loading)
+	DebugLogger.debug(SOURCE, "Step 1: Creating SystemsManager")
 	systems = SystemsManager.new()
 	add_child(systems)
 
 	# 2. Safely get optional node references
+	DebugLogger.debug(SOURCE, "Step 2: Setting up optional nodes")
 	_setup_optional_nodes()
 
 	# 3. Initialize XR
+	DebugLogger.debug(SOURCE, "Step 3: Initializing XR")
 	_initialize_xr()
 
 	# 4. Setup tracking
+	DebugLogger.debug(SOURCE, "Step 4: Setting up controllers")
 	_setup_controllers()
 
 	# 5. Connect signals
+	DebugLogger.debug(SOURCE, "Step 5: Connecting signals")
 	_connect_signals()
 
 	# 6. Start in menu state
+	DebugLogger.debug(SOURCE, "Step 6: Entering menu state")
 	_change_state(GameState.MENU)
-	print("[MainVR] Initialization complete")
+	DebugLogger.info(SOURCE, "=== Initialization complete ===")
 
 
 func _setup_optional_nodes() -> void:
@@ -87,13 +95,13 @@ func _initialize_xr() -> void:
 	xr_interface = XRServer.find_interface("OpenXR")
 
 	if xr_interface == null:
-		push_error("OpenXR interface not found!")
+		DebugLogger.error(SOURCE, "OpenXR interface not found!")
 		_fallback_to_desktop()
 		return
 
 	if not xr_interface.is_initialized():
 		if xr_interface.initialize():
-			print("[MainVR] OpenXR initialized successfully")
+			DebugLogger.info(SOURCE, "OpenXR initialized successfully")
 
 			# Configure viewport for VR
 			get_viewport().use_xr = true
@@ -102,30 +110,49 @@ func _initialize_xr() -> void:
 			var refresh_rate := xr_interface.get_display_refresh_rate()
 			if refresh_rate > 0:
 				Engine.physics_ticks_per_second = int(refresh_rate)
-				print("[MainVR] Physics rate set to: ", refresh_rate)
+				DebugLogger.info(SOURCE, "Physics rate set to: %d" % int(refresh_rate))
 
 			xr_initialized = true
 		else:
-			push_error("Failed to initialize OpenXR!")
+			DebugLogger.error(SOURCE, "Failed to initialize OpenXR!")
 			_fallback_to_desktop()
 
 
 func _fallback_to_desktop() -> void:
-	print("[MainVR] Running in desktop mode (no VR)")
+	DebugLogger.warn(SOURCE, "Running in desktop mode (no VR)")
 	# Could add mouse/keyboard controls here for testing
 
 
 func _setup_controllers() -> void:
+	# Validate XR nodes before configuring
+	if xr_origin == null:
+		DebugLogger.error(SOURCE, "XR Origin not found - check scene structure")
+		return
+	if xr_camera == null:
+		DebugLogger.error(SOURCE, "XR Camera not found - check scene structure")
+		return
+
 	# Configure movement tracker with XR nodes
-	MovementTracker.setup_xr_nodes(xr_origin, xr_camera, left_controller, right_controller)
+	var tracker_ready := MovementTracker.setup_xr_nodes(xr_origin, xr_camera, left_controller, right_controller)
+	if not tracker_ready:
+		DebugLogger.warn(SOURCE, "Movement tracker partially configured")
 
 	# Setup HUD references
 	if movement_hud:
 		movement_hud.setup_references(xr_camera, left_controller)
 
-	# Connect controller signals
-	left_controller.button_pressed.connect(_on_left_button_pressed)
-	right_controller.button_pressed.connect(_on_right_button_pressed)
+	# Connect controller signals (with null checks)
+	if left_controller:
+		left_controller.button_pressed.connect(_on_left_button_pressed)
+		DebugLogger.debug(SOURCE, "Left controller signals connected")
+	else:
+		DebugLogger.warn(SOURCE, "Left controller not available")
+
+	if right_controller:
+		right_controller.button_pressed.connect(_on_right_button_pressed)
+		DebugLogger.debug(SOURCE, "Right controller signals connected")
+	else:
+		DebugLogger.warn(SOURCE, "Right controller not available")
 
 
 func _connect_signals() -> void:
@@ -150,7 +177,7 @@ func _change_state(new_state: GameState) -> void:
 		GameState.PAUSED:
 			_enter_paused_state()
 
-	print("[MainVR] State changed: ", GameState.keys()[old_state], " -> ", GameState.keys()[new_state])
+	DebugLogger.info(SOURCE, "State changed: %s -> %s" % [GameState.keys()[old_state], GameState.keys()[new_state]])
 
 
 func _enter_menu_state() -> void:
@@ -266,16 +293,17 @@ func _handle_controller_button(_hand: String, button: String) -> void:
 
 
 func _on_session_started(session_id: String) -> void:
-	print("[MainVR] Session started: ", session_id)
+	DebugLogger.info(SOURCE, "Session started: %s" % session_id)
 
 
 func _on_session_ended(session_id: String, summary: Dictionary) -> void:
-	print("[MainVR] Session ended: ", session_id)
-	print("[MainVR] Coverage: ", summary.get("space_map_summary", {}).get("coverage", 0), "%")
+	DebugLogger.info(SOURCE, "Session ended: %s" % session_id)
+	var coverage: float = summary.get("space_map_summary", {}).get("coverage", 0.0)
+	DebugLogger.info(SOURCE, "Coverage: %.1f%%" % coverage)
 
 
 func _on_achievement_unlocked(achievement_id: String) -> void:
-	print("[MainVR] Achievement unlocked: ", achievement_id)
+	DebugLogger.info(SOURCE, "Achievement unlocked: %s" % achievement_id)
 	# TODO: Show achievement notification in VR
 
 

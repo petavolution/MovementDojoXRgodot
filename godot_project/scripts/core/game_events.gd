@@ -2,6 +2,13 @@
 ## Autoloaded as "GameEvents"
 extends Node
 
+const SOURCE := "GameEvents"
+
+
+func _ready() -> void:
+	DebugLogger.info(SOURCE, "GameEvents signal bus initialized")
+
+
 # Movement events
 signal movement_frame_recorded(frame: MovementFrame)
 signal movement_zone_explored(zone_position: Vector3, hand: String)

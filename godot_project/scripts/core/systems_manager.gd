@@ -4,6 +4,8 @@
 extends Node
 class_name SystemsManager
 
+const SOURCE := "SystemsManager"
+
 # Singleton instance (set by main scene, not autoload)
 static var instance: SystemsManager
 
@@ -15,6 +17,9 @@ var _adaptive_difficulty: Node
 var _replay_system: Node
 var _calibration_system: Node
 var _achievement_system: Node
+
+# Loading state tracking
+var _loading_errors: Array[String] = []
 
 # System scripts
 const SCRIPTS := {
@@ -31,9 +36,11 @@ const SCRIPTS := {
 func _ready() -> void:
 	instance = self
 	name = "SystemsManager"
+	DebugLogger.info(SOURCE, "SystemsManager initialized")
 
 
 func _exit_tree() -> void:
+	DebugLogger.info(SOURCE, "SystemsManager shutting down")
 	if instance == self:
 		instance = null
 
@@ -129,18 +136,20 @@ static func achievement() -> Node:
 
 ## Preload systems needed for training mode
 func preload_training_systems() -> void:
+	DebugLogger.info(SOURCE, "Preloading training systems...")
 	get_analytics()
 	get_score()
 	get_audio()
 	get_difficulty()
-	print("[SystemsManager] Training systems preloaded")
+	DebugLogger.info(SOURCE, "Training systems preloaded")
 
 
 ## Preload systems needed for wellness mode
 func preload_wellness_systems() -> void:
+	DebugLogger.info(SOURCE, "Preloading wellness systems...")
 	get_analytics()
 	get_audio()
-	print("[SystemsManager] Wellness systems preloaded")
+	DebugLogger.info(SOURCE, "Wellness systems preloaded")
 
 
 ## Unload non-essential systems to free memory
@@ -148,12 +157,14 @@ func unload_optional_systems() -> void:
 	if _replay_system:
 		_replay_system.queue_free()
 		_replay_system = null
+		DebugLogger.info(SOURCE, "Unloaded ReplaySystem")
 
 	if _adaptive_difficulty:
 		_adaptive_difficulty.queue_free()
 		_adaptive_difficulty = null
+		DebugLogger.info(SOURCE, "Unloaded AdaptiveDifficulty")
 
-	print("[SystemsManager] Optional systems unloaded")
+	DebugLogger.info(SOURCE, "Optional systems unloaded")
 
 
 # =============================================================================
@@ -162,14 +173,26 @@ func unload_optional_systems() -> void:
 
 func _load_system(key: String, node_name: String) -> Node:
 	if not SCRIPTS.has(key):
-		push_error("[SystemsManager] Unknown system: " + key)
+		var err_msg := "Unknown system key: " + key
+		DebugLogger.error(SOURCE, err_msg)
+		_loading_errors.append(err_msg)
 		return null
 
 	var script_path: String = SCRIPTS[key]
-	var script := load(script_path)
+	DebugLogger.debug(SOURCE, "Loading system: %s from %s" % [node_name, script_path])
 
+	# Check if file exists
+	if not ResourceLoader.exists(script_path):
+		var err_msg := "Script file not found: " + script_path
+		DebugLogger.error(SOURCE, err_msg)
+		_loading_errors.append(err_msg)
+		return null
+
+	var script := load(script_path)
 	if script == null:
-		push_error("[SystemsManager] Failed to load script: " + script_path)
+		var err_msg := "Failed to load script: " + script_path
+		DebugLogger.error(SOURCE, err_msg)
+		_loading_errors.append(err_msg)
 		return null
 
 	var node := Node.new()
@@ -177,8 +200,13 @@ func _load_system(key: String, node_name: String) -> Node:
 	node.name = node_name
 	add_child(node)
 
-	print("[SystemsManager] Loaded: " + node_name)
+	DebugLogger.info(SOURCE, "Loaded: " + node_name)
 	return node
+
+
+## Get any loading errors that occurred
+func get_loading_errors() -> Array[String]:
+	return _loading_errors.duplicate()
 
 
 ## Check if a system is loaded

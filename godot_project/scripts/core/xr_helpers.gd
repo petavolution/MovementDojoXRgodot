@@ -517,6 +517,12 @@ static func has_diagnostics_flag() -> bool:
 	return "--vr-diagnostics" in args or "-vr-diagnostics" in args
 
 
+## Check if --vr-smoke-test flag is present
+static func has_smoke_test_flag() -> bool:
+	var args := OS.get_cmdline_args()
+	return "--vr-smoke-test" in args or "-vr-smoke-test" in args
+
+
 ## Check if --headless flag is present (for CI/testing)
 static func has_headless_flag() -> bool:
 	var args := OS.get_cmdline_args()

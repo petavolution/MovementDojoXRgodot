@@ -47,10 +47,15 @@ var systems: SystemsManager
 
 
 func _ready() -> void:
-	# Check for VR diagnostics mode
+	# Check for special modes (diagnostics, smoke test)
 	if XRHelpers.has_diagnostics_flag():
 		DebugLogger.info(SOURCE, "VR Diagnostics mode detected - switching to diagnostics scene")
 		get_tree().change_scene_to_file("res://scenes/vr_diagnostics.tscn")
+		return
+
+	if XRHelpers.has_smoke_test_flag():
+		DebugLogger.info(SOURCE, "VR Smoke Test mode detected - switching to smoke test scene")
+		get_tree().change_scene_to_file("res://scenes/dojo_smoke_test.tscn")
 		return
 
 	DebugLogger.info(SOURCE, "=== Starting initialization ===")

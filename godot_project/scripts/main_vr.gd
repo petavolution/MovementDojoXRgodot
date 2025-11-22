@@ -45,31 +45,59 @@ var systems: SystemsManager
 func _ready() -> void:
 	DebugLogger.info(SOURCE, "=== Starting initialization ===")
 
-	# 1. Setup systems manager first (for lazy-loading)
-	DebugLogger.debug(SOURCE, "Step 1: Creating SystemsManager")
+	# 1. CRITICAL: Validate required XR nodes exist BEFORE anything else
+	DebugLogger.debug(SOURCE, "Step 1: Validating scene structure")
+	if not _validate_scene_structure():
+		DebugLogger.error(SOURCE, "Scene structure validation failed - aborting")
+		return
+
+	# 2. Initialize XR EARLY (sets viewport mode before first render)
+	DebugLogger.debug(SOURCE, "Step 2: Initializing XR")
+	_initialize_xr()
+
+	# 3. Setup systems manager (for lazy-loading)
+	DebugLogger.debug(SOURCE, "Step 3: Creating SystemsManager")
 	systems = SystemsManager.new()
 	add_child(systems)
 
-	# 2. Safely get optional node references
-	DebugLogger.debug(SOURCE, "Step 2: Setting up optional nodes")
+	# 4. Safely get optional node references
+	DebugLogger.debug(SOURCE, "Step 4: Setting up optional nodes")
 	_setup_optional_nodes()
 
-	# 3. Initialize XR
-	DebugLogger.debug(SOURCE, "Step 3: Initializing XR")
-	_initialize_xr()
-
-	# 4. Setup tracking
-	DebugLogger.debug(SOURCE, "Step 4: Setting up controllers")
+	# 5. Setup tracking (after XR is initialized)
+	DebugLogger.debug(SOURCE, "Step 5: Setting up controllers")
 	_setup_controllers()
 
-	# 5. Connect signals
-	DebugLogger.debug(SOURCE, "Step 5: Connecting signals")
+	# 6. Connect signals
+	DebugLogger.debug(SOURCE, "Step 6: Connecting signals")
 	_connect_signals()
 
-	# 6. Start in menu state
-	DebugLogger.debug(SOURCE, "Step 6: Entering menu state")
+	# 7. Start in menu state
+	DebugLogger.debug(SOURCE, "Step 7: Entering menu state")
 	_change_state(GameState.MENU)
-	DebugLogger.info(SOURCE, "=== Initialization complete ===")
+
+	DebugLogger.info(SOURCE, "=== Initialization complete (mode: %s) ===" % ("Desktop" if desktop_mode else "VR"))
+
+
+func _validate_scene_structure() -> bool:
+	# Validate critical XR nodes exist (required for rendering)
+	var valid := true
+
+	if xr_origin == null:
+		DebugLogger.error(SOURCE, "CRITICAL: XROrigin3D not found in scene!")
+		valid = false
+
+	if xr_camera == null:
+		DebugLogger.error(SOURCE, "CRITICAL: XRCamera3D not found in scene!")
+		valid = false
+
+	# Controllers are optional but warn if missing
+	if left_controller == null:
+		DebugLogger.warn(SOURCE, "Left controller not found")
+	if right_controller == null:
+		DebugLogger.warn(SOURCE, "Right controller not found")
+
+	return valid
 
 
 func _setup_optional_nodes() -> void:
@@ -147,27 +175,37 @@ func _initialize_xr() -> void:
 	xr_interface = XRServer.find_interface("OpenXR")
 
 	if xr_interface == null:
-		DebugLogger.error(SOURCE, "OpenXR interface not found!")
+		DebugLogger.warn(SOURCE, "OpenXR interface not found")
 		_fallback_to_desktop()
 		return
 
-	if not xr_interface.is_initialized():
-		if xr_interface.initialize():
-			DebugLogger.info(SOURCE, "OpenXR initialized successfully")
+	# CRITICAL: Set viewport to XR mode BEFORE initializing
+	# This ensures first frame renders correctly in stereo
+	get_viewport().use_xr = true
 
-			# Configure viewport for VR
-			get_viewport().use_xr = true
+	# Handle both fresh init and already-initialized cases
+	var init_success := xr_interface.is_initialized()
+	if not init_success:
+		init_success = xr_interface.initialize()
 
-			# Get refresh rate
-			var refresh_rate := xr_interface.get_display_refresh_rate()
-			if refresh_rate > 0:
-				Engine.physics_ticks_per_second = int(refresh_rate)
-				DebugLogger.info(SOURCE, "Physics rate set to: %d" % int(refresh_rate))
+	if init_success:
+		DebugLogger.info(SOURCE, "OpenXR %s" % ("already initialized" if xr_interface.is_initialized() else "initialized"))
 
-			xr_initialized = true
+		# Sync physics rate to display refresh (90Hz typical for VR)
+		var refresh_rate := xr_interface.get_display_refresh_rate()
+		if refresh_rate > 0:
+			Engine.physics_ticks_per_second = int(refresh_rate)
+			DebugLogger.info(SOURCE, "Physics rate synced to display: %d Hz" % int(refresh_rate))
 		else:
-			DebugLogger.error(SOURCE, "Failed to initialize OpenXR!")
-			_fallback_to_desktop()
+			# Fallback to standard VR rate
+			Engine.physics_ticks_per_second = 90
+			DebugLogger.info(SOURCE, "Using default 90Hz physics rate")
+
+		xr_initialized = true
+		DebugLogger.info(SOURCE, "XR rendering enabled")
+	else:
+		DebugLogger.error(SOURCE, "Failed to initialize OpenXR!")
+		_fallback_to_desktop()
 
 
 func _fallback_to_desktop() -> void:
@@ -175,11 +213,24 @@ func _fallback_to_desktop() -> void:
 	desktop_mode = true
 	xr_initialized = true  # Allow _process to run
 
+	# CRITICAL: Disable XR viewport mode for desktop rendering
+	get_viewport().use_xr = false
+
+	# Position camera at eye height (1.6m) for desktop view
+	if xr_camera:
+		xr_camera.position.y = 1.6
+
+	# Position simulated controllers at rest position
+	if left_controller:
+		left_controller.position = Vector3(-0.3, 1.0, -0.3)
+	if right_controller:
+		right_controller.position = Vector3(0.3, 1.0, -0.3)
+
 	# Enable mouse capture for FPS-style controls
 	Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
 
-	# Disable XR viewport mode
-	get_viewport().use_xr = false
+	# Use standard 60Hz physics for desktop
+	Engine.physics_ticks_per_second = 60
 
 	DebugLogger.info(SOURCE, "Desktop controls: WASD=move, Mouse=look, ESC=release mouse, Space=menu")
 

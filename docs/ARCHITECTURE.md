@@ -16,11 +16,11 @@ These systems are required for basic application function:
 
 | System | Purpose | Dependencies |
 |--------|---------|--------------|
-| `Logger` | Debug output to file | None (loads first) |
-| `GameEvents` | Signal bus | Logger |
-| `XRInputManager` | Controller input | Logger |
-| `MovementTracker` | XR data capture | Logger, GameEvents |
-| `SessionManager` | Data persistence | Logger, MovementTracker, GameEvents |
+| `DebugLogger` | Debug output to file | None (loads first) |
+| `GameEvents` | Signal bus | DebugLogger |
+| `XRInputManager` | Controller input | DebugLogger |
+| `MovementTracker` | XR data capture | DebugLogger, GameEvents |
+| `SessionManager` | Data persistence | DebugLogger, MovementTracker, GameEvents |
 
 ### Tier 2: Core Gameplay (Lazy-loaded via SystemsManager)
 Instantiated by main scene when needed:
@@ -49,7 +49,7 @@ Application Start
     ▼
 ┌─────────────────────────────────────┐
 │  1. Godot Autoloads (in order)      │
-│     • Logger (DebugLogger)          │
+│     • DebugLogger (first - logs all)│
 │     • GameEvents                    │
 │     • XRInputManager                │
 │     • MovementTracker               │
@@ -59,20 +59,22 @@ Application Start
     ▼
 ┌─────────────────────────────────────┐
 │  2. Main Scene (_ready)             │
+│     • _validate_scene_structure()   │
+│       - CRITICAL: Verify XR nodes   │
+│       - Abort if missing            │
+│     • _initialize_xr()              │
+│       - Set viewport.use_xr FIRST   │
+│       - Find & init OpenXR          │
+│       - Sync physics to 90Hz        │
+│       - Or fallback to desktop mode │
 │     • Create SystemsManager         │
 │     • _setup_optional_nodes()       │
-│       - Get references to sabers    │
-│       - Get visualization nodes     │
-│     • _initialize_xr()              │
-│       - Find OpenXR interface       │
-│       - Initialize XR viewport      │
-│       - Set physics rate to 90Hz    │
+│       - Get visualization refs      │
+│       - Get saber refs              │
 │     • _setup_controllers()          │
 │       - Link XR nodes to tracker    │
 │       - Configure HUD references    │
-│       - Connect controller signals  │
 │     • _connect_signals()            │
-│       - Wire GameEvents handlers    │
 │     • _change_state(MENU)           │
 └─────────────────────────────────────┘
     │
@@ -84,6 +86,13 @@ Application Start
 │     • Load Tier 2 systems           │
 └─────────────────────────────────────┘
 ```
+
+**Desktop Mode Fallback:**
+When VR is unavailable, the app auto-detects and enables desktop mode:
+- Camera positioned at 1.6m eye height
+- WASD movement, mouse look controls
+- Simulated controller positions for testing
+- 60Hz physics (instead of 90Hz VR)
 
 ## Data Flow
 

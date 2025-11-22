@@ -38,9 +38,12 @@ func _process(delta: float) -> void:
 	_pulse_phase += delta * pulse_speed
 	var pulse_scale := 1.0 + sin(_pulse_phase) * 0.2
 
-	for indicator in active_indicators:
+	# Update indicator positions and scale (relative to head)
+	for i in range(active_indicators.size()):
+		var indicator := active_indicators[i]
 		if is_instance_valid(indicator):
 			indicator.scale = Vector3.ONE * indicator_size * pulse_scale
+			indicator.position = target_positions[i] + _head_position
 
 	# Periodically update target zones
 	_update_timer += delta
@@ -50,11 +53,12 @@ func _process(delta: float) -> void:
 
 
 func _setup_indicator_resources() -> void:
+	# Low-poly sphere for indicators (max 10, so complexity matters less)
 	indicator_mesh = SphereMesh.new()
 	indicator_mesh.radius = 0.5
 	indicator_mesh.height = 1.0
-	indicator_mesh.radial_segments = 16
-	indicator_mesh.rings = 8
+	indicator_mesh.radial_segments = 8  # Reduced from 16
+	indicator_mesh.rings = 4  # Reduced from 8
 
 	indicator_material = StandardMaterial3D.new()
 	indicator_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED

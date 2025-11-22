@@ -10,35 +10,65 @@ enum GameState {
 	PAUSED
 }
 
-# XR nodes
+# XR nodes (required)
 @onready var xr_origin: XROrigin3D = $XROrigin3D
 @onready var xr_camera: XRCamera3D = $XROrigin3D/XRCamera3D
 @onready var left_controller: XRController3D = $XROrigin3D/LeftController
 @onready var right_controller: XRController3D = $XROrigin3D/RightController
 
-# Game components
-@onready var left_saber: Lightsaber = $XROrigin3D/LeftController/LeftSaber
-@onready var right_saber: Lightsaber = $XROrigin3D/RightController/RightSaber
-@onready var movement_trail: MovementTrail = $MovementTrail
-@onready var heat_map: MovementHeatMap = $MovementHeatMap
-@onready var gap_indicators: GapIndicator = $GapIndicators
-@onready var movement_hud: MovementHUD = $MovementHUD
-@onready var dojo_environment: Node3D = $DojoEnvironment
-@onready var target_spawner: Node3D = $TargetSpawner
+# Game components (optional - null-safe access)
+var left_saber: Lightsaber
+var right_saber: Lightsaber
+var movement_trail: MovementTrail
+var heat_map: MovementHeatMap
+var gap_indicators: GapIndicator
+var movement_hud: MovementHUD
+var dojo_environment: Node3D
+var target_spawner: Node3D
 
 # State
 var current_state := GameState.INITIALIZING
 var xr_interface: XRInterface
 var xr_initialized := false
 
+# Systems manager (lazy-loads secondary systems)
+var systems: SystemsManager
+
 
 func _ready() -> void:
+	print("[MainVR] Starting initialization...")
+
+	# 1. Setup systems manager first (for lazy-loading)
+	systems = SystemsManager.new()
+	add_child(systems)
+
+	# 2. Safely get optional node references
+	_setup_optional_nodes()
+
+	# 3. Initialize XR
 	_initialize_xr()
+
+	# 4. Setup tracking
 	_setup_controllers()
+
+	# 5. Connect signals
 	_connect_signals()
 
-	# Start in menu state
+	# 6. Start in menu state
 	_change_state(GameState.MENU)
+	print("[MainVR] Initialization complete")
+
+
+func _setup_optional_nodes() -> void:
+	# Safely get references to optional nodes
+	left_saber = get_node_or_null("XROrigin3D/LeftController/LeftSaber")
+	right_saber = get_node_or_null("XROrigin3D/RightController/RightSaber")
+	movement_trail = get_node_or_null("MovementTrail")
+	heat_map = get_node_or_null("MovementHeatMap")
+	gap_indicators = get_node_or_null("GapIndicators")
+	movement_hud = get_node_or_null("MovementHUD")
+	dojo_environment = get_node_or_null("DojoEnvironment")
+	target_spawner = get_node_or_null("TargetSpawner")
 
 
 func _process(_delta: float) -> void:
@@ -136,6 +166,10 @@ func _enter_menu_state() -> void:
 
 
 func _enter_training_state() -> void:
+	# Preload training systems via lazy loader
+	if systems:
+		systems.preload_training_systems()
+
 	# Start session if not already running
 	if not SessionManager.session_active:
 		SessionManager.start_session()
@@ -157,6 +191,10 @@ func _enter_training_state() -> void:
 
 
 func _enter_wellness_state() -> void:
+	# Preload wellness systems via lazy loader
+	if systems:
+		systems.preload_wellness_systems()
+
 	# Start session
 	if not SessionManager.session_active:
 		SessionManager.start_session()
@@ -211,7 +249,7 @@ func _on_right_button_pressed(button: String) -> void:
 	_handle_controller_button("right", button)
 
 
-func _handle_controller_button(hand: String, button: String) -> void:
+func _handle_controller_button(_hand: String, button: String) -> void:
 	match button:
 		"menu_button":
 			if current_state == GameState.MENU:
@@ -220,10 +258,11 @@ func _handle_controller_button(hand: String, button: String) -> void:
 				return_to_menu()
 
 		"by_button":  # B/Y button
-			# Toggle heat map
-			var new_visible := not heat_map.visible
-			heat_map.visible = new_visible
-			SessionManager.update_setting("heat_map_visible", new_visible)
+			# Toggle heat map (null-safe)
+			if heat_map:
+				var new_visible := not heat_map.visible
+				heat_map.visible = new_visible
+				SessionManager.update_setting("heat_map_visible", new_visible)
 
 
 func _on_session_started(session_id: String) -> void:

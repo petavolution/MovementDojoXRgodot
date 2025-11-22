@@ -174,7 +174,12 @@ func _generate_short_uuid() -> String:
 
 
 func _compile_session_summary() -> Dictionary:
-	var stats := MovementAnalytics.get_current_stats()
+	# Get analytics stats if available (lazy-loaded)
+	var stats := {}
+	var analytics := SystemsManager.analytics() if SystemsManager.instance else null
+	if analytics and analytics.has_method("get_current_stats"):
+		stats = analytics.get_current_stats()
+
 	var space_map := MovementTracker.get_space_map()
 	var frames := MovementTracker.get_all_frames()
 

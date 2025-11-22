@@ -92,9 +92,51 @@ godot --vr-smoke-test
 - Jittery tracking → Check Virtual Desktop streaming quality
 - Black screen → Check SteamVR compositor, restart VR
 
-## Step 3: Normal Launch (Optional)
+## Step 3: Dojo Level 1 Training
 
-If Steps 1 and 2 pass, the full engine should work:
+Run the Level 1 training sequence to test the full gameplay loop:
+
+```bash
+cd godot_project
+godot --dojo-level1
+```
+
+**Expected in HMD:**
+- Same dojo environment as smoke test (floor, pillars, back wall)
+- Right hand: Debug saber (trigger to activate)
+- Left hand: Debug blaster
+- Voice/text prompts guiding through training phases
+
+**Training Flow (State Machine):**
+1. **INTRO** (~5s): Welcome message, show controls
+2. **SABER_DRILL** (~15s): Practice saber activation and swings
+3. **BLASTER_DRILL** (~15s): Practice blaster aiming
+4. **MIXED_DRILL** (~15s): Combined combat practice
+5. **SUMMARY**: Display session stats (hits, time, etc.)
+
+**Expected in Log:**
+```
+[Level1] State: IDLE → INTRO
+[Level1] State: INTRO → SABER_DRILL
+...
+[Level1] Level complete. Stats: {...}
+```
+
+**Test Actions:**
+1. Follow the training prompts in each phase
+2. Pull right trigger to activate saber
+3. Pull left trigger to fire blaster
+4. Observe state transitions in log
+5. Press menu button or ESC to exit cleanly
+
+**If Issues:**
+- State not advancing → Check Level1Controller logs for timer issues
+- Weapons not visible → Verify XR controller tracking
+- Immediate exit → Check for XR initialization failure in log
+
+## Step 4: Normal Launch (Optional)
+
+If Steps 1-3 pass, the full engine should work:
 
 ```bash
 cd godot_project
@@ -118,6 +160,7 @@ Log rotation keeps the last 3 sessions (engine.log.1, engine.log.2, engine.log.3
 |---------|---------|---------------|
 | `godot --vr-diagnostics` | Automated XR validation | "PASS" message, exit code 0 |
 | `godot --vr-smoke-test` | Visual/tracking verification | See floor, weapons, stable tracking |
+| `godot --dojo-level1` | Level 1 training flow | Completes all 5 states, shows summary |
 | `godot` | Full game launch | No errors, enters menu state |
 
 ## Troubleshooting Common Issues

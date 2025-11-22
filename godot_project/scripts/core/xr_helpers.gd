@@ -523,6 +523,12 @@ static func has_smoke_test_flag() -> bool:
 	return "--vr-smoke-test" in args or "-vr-smoke-test" in args
 
 
+## Check if --dojo-level1 flag is present
+static func has_level1_flag() -> bool:
+	var args := OS.get_cmdline_args()
+	return "--dojo-level1" in args or "-dojo-level1" in args or "--level1" in args
+
+
 ## Check if --headless flag is present (for CI/testing)
 static func has_headless_flag() -> bool:
 	var args := OS.get_cmdline_args()

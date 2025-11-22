@@ -65,6 +65,7 @@ func _ready() -> void:
 	DebugLogger.debug(SOURCE, "Step 1: Validating scene structure")
 	if not _validate_scene_structure():
 		DebugLogger.error(SOURCE, "Scene structure validation failed - aborting")
+		EngineShutdown.startup_failure("MainVR", "Required XR nodes missing from scene")
 		return
 
 	# 2. Initialize XR EARLY with enhanced error handling

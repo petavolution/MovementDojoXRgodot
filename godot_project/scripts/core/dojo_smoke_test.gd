@@ -40,6 +40,8 @@ func _ready() -> void:
 
 	if not xr_initialized:
 		DebugLogger.error(SOURCE, "XR initialization failed - smoke test cannot continue")
+		# Use centralized shutdown for clean exit
+		EngineShutdown.startup_failure("SmokeTest", "XR initialization failed")
 		return
 
 	# Build scene
@@ -53,6 +55,7 @@ func _ready() -> void:
 	DebugLogger.info(SOURCE, "")
 	DebugLogger.info(SOURCE, "Smoke test scene ready. Move controllers to verify tracking.")
 	DebugLogger.info(SOURCE, "Right trigger = activate saber, Left trigger = blaster fire (visual only)")
+	DebugLogger.info(SOURCE, "Press menu button or ESC to exit.")
 
 
 func _setup_xr() -> void:
@@ -320,6 +323,11 @@ func _process(delta: float) -> void:
 	if not xr_initialized:
 		return
 
+	# Check for exit request (ESC key)
+	if Input.is_action_just_pressed("ui_cancel"):
+		_request_exit()
+		return
+
 	# Periodic status logging
 	_status_log_timer += delta
 	if _status_log_timer >= STATUS_LOG_INTERVAL:
@@ -329,6 +337,16 @@ func _process(delta: float) -> void:
 	# Gentle drone hover animation
 	if dummy_drone:
 		dummy_drone.position.y = 1.8 + sin(Time.get_ticks_msec() * 0.002) * 0.1
+
+
+func _exit_tree() -> void:
+	DebugLogger.info(SOURCE, "Smoke test scene exiting")
+	DebugLogger.flush()
+
+
+func _request_exit() -> void:
+	DebugLogger.info(SOURCE, "Exit requested by user")
+	EngineShutdown.request_shutdown("Smoke test completed by user", 0)
 
 
 func _log_tracking_status() -> void:
@@ -376,10 +394,14 @@ func _on_left_float_changed(action_name: String, value: float) -> void:
 
 func _on_right_button_pressed(button: String) -> void:
 	DebugLogger.debug(SOURCE, "Right button: %s" % button)
+	if button == "menu_button":
+		_request_exit()
 
 
 func _on_left_button_pressed(button: String) -> void:
 	DebugLogger.debug(SOURCE, "Left button: %s" % button)
+	if button == "menu_button":
+		_request_exit()
 
 
 func _flash_blaster() -> void:

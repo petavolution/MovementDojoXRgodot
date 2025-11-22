@@ -365,9 +365,15 @@ func _finalize_diagnostics() -> void:
 	# Emit signal for programmatic use
 	diagnostics_complete.emit(diagnostic_results)
 
-	# Exit after short delay to ensure log flush
-	await get_tree().create_timer(0.5).timeout
-	get_tree().quit(0 if diagnostic_results.overall_pass else 1)
+	# Clean shutdown with log flush
+	var exit_code := 0 if diagnostic_results.overall_pass else 1
+	var reason := "VR Diagnostics: %s" % ("PASS" if diagnostic_results.overall_pass else "FAIL - " + diagnostic_results.failure_reason)
+
+	# Short delay to ensure all logs are visible
+	await get_tree().create_timer(0.3).timeout
+
+	# Use centralized shutdown
+	EngineShutdown.request_shutdown(reason, exit_code)
 
 
 func _evaluate_results() -> void:

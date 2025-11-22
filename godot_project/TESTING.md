@@ -209,6 +209,42 @@ Level 1 can also be started via:
 
 All modes use the same hardened OpenXR startup sequence with graceful fallback.
 
+### Training Environment Selection
+
+Level 1 supports three procedurally-generated training environments. Use the `--env` flag:
+
+| Command | Environment | Description |
+|---------|-------------|-------------|
+| `godot --dojo-level1 --env=dojo` | Kung-Fu Dojo (default) | 10m×8m wooden room, tatami floor, pillars, weapon rack, holoscreens |
+| `godot --dojo-level1 --env=ocean` | Ocean Platform | 6m×6m stone platform with railings, infinite ocean, sky dome |
+| `godot --dojo-level1 --env=hyperspace` | Hyperspace Cockpit | Hexagonal platform, sci-fi consoles, animated star streaks |
+
+**Examples:**
+```bash
+# Default kung-fu dojo (no flag needed)
+godot --dojo-level1
+
+# Ocean platform with water and sky
+godot --dojo-level1 --env=ocean
+
+# Hyperspace with animated streaks
+godot --dojo-level1 --env=hyperspace
+
+# Short flag with environment
+godot --level1 --env=hyperspace
+```
+
+**Environment Aliases:**
+Each environment accepts multiple names:
+- Dojo: `dojo`, `kungfu`, `kung-fu`
+- Ocean: `ocean`, `platform`, `ocean-platform`
+- Hyperspace: `hyperspace`, `space`, `cockpit`
+
+**Fallback Behavior:**
+- Unknown environment names default to dojo
+- If environment fails to load, automatically falls back to dojo
+- Log shows selected environment: `[EnvLoader] Selected environment from CLI: <name>`
+
 ## Troubleshooting Common Issues
 
 ### Level 1 Preflight Failures

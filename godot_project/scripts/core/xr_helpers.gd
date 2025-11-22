@@ -542,3 +542,54 @@ static func get_diagnostic_timeout_ms() -> int:
 		if args[i] == "--diagnostic-timeout":
 			return int(args[i + 1]) * 1000
 	return 5000  # Default 5 seconds
+
+
+# =============================================================================
+# ENVIRONMENT SELECTION
+# =============================================================================
+
+## Environment types available for training
+enum EnvironmentType {
+	DOJO,        # Kung-fu dojo (default)
+	OCEAN,       # Ocean platform
+	HYPERSPACE,  # Spaceship in hyperspace
+}
+
+## Environment type names for logging
+const ENVIRONMENT_NAMES := {
+	EnvironmentType.DOJO: "dojo",
+	EnvironmentType.OCEAN: "ocean",
+	EnvironmentType.HYPERSPACE: "hyperspace",
+}
+
+## Get environment type from command line --env=<type> flag
+## Returns the specified environment, or DOJO as default
+static func get_environment_flag() -> EnvironmentType:
+	var args := OS.get_cmdline_args()
+	for arg in args:
+		if arg.begins_with("--env="):
+			var env_name := arg.substr(6).to_lower().strip_edges()
+			return _parse_environment_name(env_name)
+		elif arg.begins_with("-env="):
+			var env_name := arg.substr(5).to_lower().strip_edges()
+			return _parse_environment_name(env_name)
+	return EnvironmentType.DOJO  # Default
+
+
+## Parse environment name string to enum
+static func _parse_environment_name(name: String) -> EnvironmentType:
+	match name:
+		"ocean", "oceanplatform", "ocean_platform":
+			return EnvironmentType.OCEAN
+		"hyperspace", "space", "spaceship":
+			return EnvironmentType.HYPERSPACE
+		"dojo", "kungfu", "kungfudojo", "kungfu_dojo":
+			return EnvironmentType.DOJO
+		_:
+			DebugLogger.warn("XRHelpers", "Unknown environment '%s', using dojo" % name)
+			return EnvironmentType.DOJO
+
+
+## Get human-readable name for environment type
+static func get_environment_name(env_type: EnvironmentType) -> String:
+	return ENVIRONMENT_NAMES.get(env_type, "unknown")

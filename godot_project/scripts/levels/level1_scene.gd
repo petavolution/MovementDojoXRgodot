@@ -41,8 +41,11 @@ var right_controller: XRController3D
 var level_controller: Level1Controller
 var drone_spawner: Level1DroneSpawner
 var feedback_ui: Level1Feedback
-var dojo_environment: Node3D
+var environment_loader: EnvironmentLoader
 var active_entities: Node3D
+
+# Selected environment type (from CLI or default)
+var selected_environment: XRHelpers.EnvironmentType = XRHelpers.EnvironmentType.DOJO
 
 # Weapon placeholders (until real implementations)
 var debug_saber: Node3D
@@ -284,106 +287,23 @@ func _build_scene_structure() -> void:
 
 
 func _build_dojo_environment() -> void:
-	DebugLogger.info(SOURCE, "Building dojo environment...")
+	# Get selected environment from CLI (--env=ocean, --env=hyperspace, etc.)
+	selected_environment = XRHelpers.get_environment_flag()
+	var env_name := XRHelpers.get_environment_name(selected_environment)
 
-	# Create environment container
-	dojo_environment = Node3D.new()
-	dojo_environment.name = "DojoEnvironment"
-	add_child(dojo_environment)
+	DebugLogger.info(SOURCE, "Building training environment: %s" % env_name)
 
-	# Floor (octagonal-ish, but simple plane for now)
-	var floor_mesh := PlaneMesh.new()
-	floor_mesh.size = Vector2(12.0, 12.0)
+	# Create environment loader
+	environment_loader = EnvironmentLoader.new()
+	environment_loader.name = "EnvironmentLoader"
+	add_child(environment_loader)
 
-	var floor_mat := StandardMaterial3D.new()
-	floor_mat.albedo_color = Color(0.12, 0.12, 0.15)
-	floor_mat.roughness = 0.8
+	# Load the selected environment
+	if not environment_loader.load_environment(selected_environment):
+		DebugLogger.error(SOURCE, "Failed to load environment: %s" % env_name)
+		# EnvironmentLoader handles fallback to dojo internally
 
-	var floor := MeshInstance3D.new()
-	floor.name = "Floor"
-	floor.mesh = floor_mesh
-	floor.material_override = floor_mat
-	dojo_environment.add_child(floor)
-
-	# Walls (8 segments for octagonal dojo feel)
-	_create_octagonal_walls()
-
-	# Ambient lighting
-	var main_light := DirectionalLight3D.new()
-	main_light.name = "MainLight"
-	main_light.light_energy = 0.6
-	main_light.shadow_enabled = true
-	main_light.rotation_degrees = Vector3(-50, 30, 0)
-	dojo_environment.add_child(main_light)
-
-	# Accent lights (blue tint for dojo atmosphere)
-	_create_accent_lights()
-
-	# Environment settings
-	var env := Environment.new()
-	env.background_mode = Environment.BG_COLOR
-	env.background_color = Color(0.03, 0.03, 0.06)
-	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	env.ambient_light_color = Color(0.15, 0.15, 0.25)
-	env.ambient_light_energy = 0.4
-
-	var world_env := WorldEnvironment.new()
-	world_env.name = "WorldEnvironment"
-	world_env.environment = env
-	dojo_environment.add_child(world_env)
-
-	DebugLogger.debug(SOURCE, "Dojo environment built")
-
-
-func _create_octagonal_walls() -> void:
-	var wall_height := 4.0
-	var wall_distance := 5.5
-	var wall_width := 4.5
-
-	var wall_mesh := BoxMesh.new()
-	wall_mesh.size = Vector3(wall_width, wall_height, 0.3)
-
-	var wall_mat := StandardMaterial3D.new()
-	wall_mat.albedo_color = Color(0.15, 0.15, 0.18)
-	wall_mat.roughness = 0.9
-
-	# Create 8 wall segments
-	for i in range(8):
-		var angle := i * PI / 4.0  # 45 degrees each
-		var pos := Vector3(
-			cos(angle) * wall_distance,
-			wall_height / 2.0,
-			sin(angle) * wall_distance
-		)
-
-		var wall := MeshInstance3D.new()
-		wall.name = "Wall%d" % i
-		wall.mesh = wall_mesh
-		wall.material_override = wall_mat
-		wall.position = pos
-		wall.rotation.y = angle + PI / 2.0  # Face center
-		dojo_environment.add_child(wall)
-
-
-func _create_accent_lights() -> void:
-	var light_positions := [
-		Vector3(4, 2.5, 0),
-		Vector3(-4, 2.5, 0),
-		Vector3(0, 2.5, 4),
-		Vector3(0, 2.5, -4),
-	]
-
-	var accent_color := Color(0.3, 0.5, 1.0)  # Blue tint
-
-	for i in range(light_positions.size()):
-		var light := OmniLight3D.new()
-		light.name = "AccentLight%d" % i
-		light.position = light_positions[i]
-		light.light_color = accent_color
-		light.light_energy = 0.3
-		light.omni_range = 6.0
-		light.omni_attenuation = 1.5
-		dojo_environment.add_child(light)
+	DebugLogger.info(SOURCE, "Environment ready: %s" % env_name)
 
 
 # =============================================================================

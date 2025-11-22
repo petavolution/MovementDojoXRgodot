@@ -63,6 +63,12 @@ func _ready() -> void:
 		get_tree().change_scene_to_file("res://scenes/levels/level1.tscn")
 		return
 
+	if XRHelpers.has_training_sequence_flag():
+		var seq_id := XRHelpers.get_training_sequence_id()
+		DebugLogger.info(SOURCE, "Training sequence mode detected - loading sequence: %s" % seq_id)
+		_start_training_sequence_scene()
+		return
+
 	DebugLogger.info(SOURCE, "=== Starting initialization ===")
 	xr_startup_results = XRHelpers.DiagnosticResults.new()
 
@@ -548,3 +554,15 @@ func _on_achievement_unlocked(achievement_id: String) -> void:
 func _on_target_hit(target: Node3D, damage: float, position: Vector3) -> void:
 	if target.has_method("take_damage"):
 		target.take_damage(damage, position)
+
+
+## Start training sequence scene programmatically
+## Used when --training-sequence flag is detected
+func _start_training_sequence_scene() -> void:
+	# Create the training sequence scene dynamically since it's code-driven
+	var scene := TrainingSequenceScene.new()
+	scene.name = "TrainingSequenceScene"
+
+	# Replace this scene with the training sequence scene
+	get_tree().root.add_child(scene)
+	queue_free()

@@ -199,6 +199,7 @@ Log rotation keeps the last 3 sessions (engine.log.1, engine.log.2, engine.log.3
 | `godot --vr-diagnostics` | Automated XR validation | "PASS" message, exit code 0 |
 | `godot --vr-smoke-test` | Visual/tracking verification | See floor, weapons, stable tracking |
 | `godot --dojo-level1` | Level 1 training flow | Preflight PASS, completes all 5 states, shows summary |
+| `godot --training-sequence=level1` | Data-driven Level 1 | Sequence loads, phases execute, summary shown |
 | `godot` | Full game launch | No errors, enters menu state |
 
 ### Alternative Launch Methods
@@ -244,6 +245,44 @@ Each environment accepts multiple names:
 - Unknown environment names default to dojo
 - If environment fails to load, automatically falls back to dojo
 - Log shows selected environment: `[EnvLoader] Selected environment from CLI: <name>`
+
+### Data-Driven Training Sequences (New)
+
+The new training sequence system uses data-driven definitions for flexible level design:
+
+```bash
+# Run Level 1 via the new data-driven system
+godot --training-sequence=level1
+
+# Alternative format
+godot --training-sequence-level1
+
+# Combine with environment selection
+godot --training-sequence=level1 --env=ocean
+```
+
+**Available Sequences:**
+- `level1` / `level1_fundamentals` - Beginner training (saber, blaster, mixed)
+- `level2` / `level2_intermediate` - Coming soon
+- `endless_survival` - Coming soon
+
+**Architecture Overview:**
+```
+TrainingSequence (e.g., "Level 1")
+  └── TrainingPhase (e.g., "Saber Basics")
+        └── TrainingWave (e.g., "Block 3 projectiles")
+              └── WaveSpawnEntry (e.g., "2x Flying Drone")
+```
+
+**Log Output:**
+```
+[TrnSeqCtrl] ═══ SEQUENCE: LEVEL 1: FUNDAMENTALS ═══
+[TrnSeqCtrl] === PHASE 1/5: Welcome ===
+[TrnSeqCtrl] === PHASE 2/5: Saber Basics ===
+[TrnSeqCtrl] Wave 1/1: saber_w1 - 2x Flying Drone (stationary, shooting)
+[TrnSeqCtrl] Wave completed: saber_w1 (success=true)
+[TrnSeqCtrl] ═══ SEQUENCE COMPLETE! ═══
+```
 
 ## Troubleshooting Common Issues
 

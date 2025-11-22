@@ -529,6 +529,33 @@ static func has_level1_flag() -> bool:
 	return "--dojo-level1" in args or "-dojo-level1" in args or "--level1" in args
 
 
+## Check if --training-sequence flag is present (new data-driven system)
+static func has_training_sequence_flag() -> bool:
+	var args := OS.get_cmdline_args()
+	for arg in args:
+		if arg.begins_with("--training-sequence") or arg.begins_with("-training-sequence"):
+			return true
+	return false
+
+
+## Get training sequence ID from command line
+## Supports: --training-sequence=level1, --training-sequence-level1, etc.
+static func get_training_sequence_id() -> String:
+	var args := OS.get_cmdline_args()
+	for arg in args:
+		# Format: --training-sequence=<id>
+		if arg.begins_with("--training-sequence="):
+			return arg.substr(20).to_lower().strip_edges()
+		if arg.begins_with("-training-sequence="):
+			return arg.substr(19).to_lower().strip_edges()
+		# Format: --training-sequence-<id>
+		if arg.begins_with("--training-sequence-"):
+			return arg.substr(20).to_lower().strip_edges()
+		if arg.begins_with("-training-sequence-"):
+			return arg.substr(19).to_lower().strip_edges()
+	return ""
+
+
 ## Check if --headless flag is present (for CI/testing)
 static func has_headless_flag() -> bool:
 	var args := OS.get_cmdline_args()

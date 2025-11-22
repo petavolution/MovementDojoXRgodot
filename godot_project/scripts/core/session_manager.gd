@@ -1,6 +1,7 @@
 ## SessionManager - Data persistence and session lifecycle
 ## Autoloaded as "SessionManager"
 extends Node
+class_name SessionManagerClass
 
 const SOURCE := "SessionManager"
 const SAVE_DIR := "user://movement_dojo/"

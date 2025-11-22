@@ -131,7 +131,7 @@ godot_project/
 [autoload]
 ; Essential systems only (loaded in dependency order)
 ; DebugLogger FIRST - captures all errors/debug output to file
-Logger="*res://scripts/core/debug_logger.gd"
+DebugLogger="*res://scripts/core/debug_logger.gd"
 ; GameEvents - signal bus with no dependencies
 GameEvents="*res://scripts/core/game_events.gd"
 ; XRInputManager - controller input handling

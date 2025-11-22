@@ -2,6 +2,7 @@
 ## Autoloaded as "MovementTracker"
 ## Records all controller/headset movements at physics tick rate
 extends Node
+class_name MovementTrackerClass
 
 const SOURCE := "MovementTracker"
 

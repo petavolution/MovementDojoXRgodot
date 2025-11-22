@@ -1,6 +1,7 @@
 ## Game Events - Global signal bus for decoupled communication
 ## Autoloaded as "GameEvents"
 extends Node
+class_name GameEventsClass
 
 const SOURCE := "GameEvents"
 

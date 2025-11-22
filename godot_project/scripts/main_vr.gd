@@ -58,15 +58,16 @@ func _ready() -> void:
 		get_tree().change_scene_to_file("res://scenes/dojo_smoke_test.tscn")
 		return
 
+	# Both --dojo-level1 and --training-sequence use the new data-driven system
 	if XRHelpers.has_level1_flag():
-		DebugLogger.info(SOURCE, "Dojo Level 1 mode detected - switching to Level 1 scene")
-		get_tree().change_scene_to_file("res://scenes/levels/level1.tscn")
+		DebugLogger.info(SOURCE, "Dojo Level 1 mode detected - using data-driven training sequence")
+		_start_training_sequence_scene("level1_fundamentals")
 		return
 
 	if XRHelpers.has_training_sequence_flag():
 		var seq_id := XRHelpers.get_training_sequence_id()
 		DebugLogger.info(SOURCE, "Training sequence mode detected - loading sequence: %s" % seq_id)
-		_start_training_sequence_scene()
+		_start_training_sequence_scene(seq_id)
 		return
 
 	DebugLogger.info(SOURCE, "=== Starting initialization ===")
@@ -558,10 +559,14 @@ func _on_target_hit(target: Node3D, damage: float, position: Vector3) -> void:
 
 ## Start training sequence scene programmatically
 ## Used when --training-sequence flag is detected
-func _start_training_sequence_scene() -> void:
+func _start_training_sequence_scene(sequence_id: String = "") -> void:
 	# Create the training sequence scene dynamically since it's code-driven
 	var scene := TrainingSequenceScene.new()
 	scene.name = "TrainingSequenceScene"
+
+	# Set sequence ID before scene enters tree (if explicitly provided)
+	if not sequence_id.is_empty():
+		scene.selected_sequence_id = sequence_id
 
 	# Replace this scene with the training sequence scene
 	get_tree().root.add_child(scene)

@@ -99,78 +99,60 @@ Run the Level 1 training sequence to test the full gameplay loop:
 ```bash
 cd godot_project
 godot --dojo-level1
+# Or equivalently:
+godot --training-sequence=level1
 ```
 
-Level 1 uses the same hardened OpenXR startup as diagnostics/smoke test, with additional
-preflight checks for assets and input bindings.
+Level 1 uses the data-driven training sequence system with preflight checks for OpenXR.
 
 **Expected in HMD:**
-- Octagonal dojo environment with dark walls and blue accent lighting
-- Right hand: Debug saber with cyan glowing blade (always active in Level 1)
+- Dojo environment (or selected environment via --env flag)
+- Right hand: Debug saber with cyan glowing blade
 - Left hand: Debug blaster
-- Floating 3D text prompts guiding through training phases
-- Visual feedback: "BLOCKED!", "HIT!", "DESTROYED!", etc.
+- Floating 3D text prompts with phase hints
+- Visual feedback: "BLOCKED!", "HIT!", "DESTROYED!", wave ratings (★★★)
 
-**Training Flow (State Machine):**
-1. **INTRO** (~10s): Welcome message, controls overview, "Relax and enjoy the chilled training"
-2. **SABER_DRILL**: Block slow-moving projectiles with saber (3 required)
-   - Slow projectiles (2 m/s) from stationary drone
-   - Visual feedback on successful blocks
-3. **BLASTER_DRILL**: Destroy stationary targets with blaster (4 required)
-   - Targets spawn at comfortable range
-   - Track hits and accuracy
-4. **MIXED_DRILL**: Combined combat with drones and one dive attack
-   - Destroy drones while blocking projectiles
-   - One clearly telegraphed dive attack (⚠️ DIVE ATTACK! warning)
-   - Evade or block the dive
-5. **SUMMARY**: Display session stats in floating panel
-   - Total duration, blocks, hits, drones destroyed
-   - Dive attack result (evaded/hit)
+**Training Flow (Data-Driven Phases):**
+1. **Welcome** (~8s): Introduction with hint text
+2. **Saber Basics**: Block 3 projectiles from 2 stationary shooters
+3. **Blaster Basics**: Destroy 3 orbiting target dummies
+4. **Mixed Combat**: Handle 2 shooters + 1 dive attacker
+5. **Summary**: Display session stats with score/rating
 
-**Expected in Log (preflight + phases):**
+**Expected in Log:**
 ```
-[Level1] === DOJO LEVEL 1 ===
-[Level1] Starting Level 1 dojo experience (chilled training mode)
-[Level1] Running preflight checks...
-[Level1]   [1/4] OpenXR initialization...
-[Level1]   PASS: OpenXR initialized
-[Level1]   [2/4] XR session validation...
-[Level1]   PASS: XR session valid
-[Level1]   [3/4] Input binding verification...
-[Level1]   PASS: Input bindings configured
-[Level1]   [4/4] Optional asset check...
-[Level1] Preflight checks: ALL PASSED
-[Level1] State: IDLE → INTRO
-[Level1] State: INTRO → SABER_DRILL
-[Level1] State: SABER_DRILL → BLASTER_DRILL
-[Level1] State: BLASTER_DRILL → MIXED_DRILL
-[Level1] State: MIXED_DRILL → SUMMARY
-[Level1] === LEVEL 1 SUMMARY ===
-[Level1] Level 1 completed successfully
+[TrnSeqScene] ═══ TRAINING SEQUENCE MODE (Data-Driven) ═══
+[TrnSeqScene] Selected sequence: level1_fundamentals
+[TrnSeqScene] Running preflight checks...
+[TrnSeqScene]   [1/3] OpenXR initialization... PASS
+[TrnSeqScene]   [2/3] Sequence validation... PASS
+[TrnSeqScene]   [3/3] Sequence structure check... PASS
+[TrnSeqCtrl] === PHASE 1/5: Welcome ===
+[TrnSeqCtrl] === PHASE 2/5: Saber Basics ===
+[TrnSeqCtrl] Wave 'saber_w1' COMPLETED - Rating: ★★★
+[TrnSeqCtrl] ═══ SEQUENCE COMPLETE! ═══
+[TrnSeqCtrl] TrainingSequenceSummary: sequence='level1_fundamentals', totalWaves=3, totalScore=9
 ```
 
 **Test Actions:**
-1. Put on headset and verify you're in the octagonal dojo
-2. Read the floating intro text
-3. **SABER_DRILL**: Block 3 slow projectiles with your saber
-4. **BLASTER_DRILL**: Shoot 4 targets with your blaster (left trigger)
-5. **MIXED_DRILL**: Destroy drones and watch for "DIVE ATTACK!" warning
-6. **SUMMARY**: Review your stats in the floating panel
-7. Press menu button or ESC to exit cleanly
+1. Put on headset and verify environment loads
+2. Read the floating intro text with hint
+3. **Saber Basics**: Block 3 projectiles with your saber
+4. **Blaster Basics**: Destroy 3 targets with your blaster (left trigger)
+5. **Mixed Combat**: Destroy drones and watch for "DIVE ATTACK!" warning
+6. **Summary**: Review your stats and star rating
+7. Press ESC to exit cleanly
 
-**Key Characteristics (Chilled Mode):**
-- Slow projectiles (2 m/s) - easy to track and block
-- Few drones (1-2 at a time)
-- Clearly telegraphed dive attack with 1.2s warning
-- Generous hit detection
-- No time pressure on drills
+**Debug Mode:**
+```bash
+godot --dojo-level1 --training-debug
+```
+Enables keyboard shortcuts: R=restart, N=next phase, W=skip wave, 1-5=jump to phase
 
 **If Issues:**
 - "Preflight checks failed" → Check log for specific FAIL message
-- State not advancing → Check for timer or spawner issues in log
+- Phase not advancing → Check for timer or spawner issues in log
 - No visual feedback → Verify Level1Feedback is created
-- Immediate exit → Look for "Level 1 aborted" in log with reason
-- Dive attack not appearing → Check Level1DroneSpawner logs
 
 ## Step 4: Normal Launch (Optional)
 
@@ -198,9 +180,9 @@ Log rotation keeps the last 3 sessions (engine.log.1, engine.log.2, engine.log.3
 |---------|---------|---------------|
 | `godot --vr-diagnostics` | Automated XR validation | "PASS" message, exit code 0 |
 | `godot --vr-smoke-test` | Visual/tracking verification | See floor, weapons, stable tracking |
-| `godot --dojo-level1` | Level 1 training flow | Preflight PASS, completes all 5 states, shows summary |
-| `godot --training-sequence=level1` | Data-driven Level 1 | Sequence loads, phases execute, summary shown |
-| `godot --training-sequence=level1 --training-debug` | Debug mode | Debug keyboard shortcuts enabled |
+| `godot --dojo-level1` | Level 1 training (data-driven) | Preflight PASS, completes all phases, shows summary |
+| `godot --dojo-level1 --training-debug` | Debug mode | Debug keyboard shortcuts enabled |
+| `godot --training-sequence=<id>` | Custom training sequence | Sequence loads, phases execute |
 | `godot` | Full game launch | No errors, enters menu state |
 
 ### Alternative Launch Methods

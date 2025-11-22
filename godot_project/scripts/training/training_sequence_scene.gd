@@ -39,8 +39,9 @@ func _ready() -> void:
 	DebugLogger.info(SOURCE, "╚═══════════════════════════════════════════════════════════╝")
 	DebugLogger.info(SOURCE, "")
 
-	# Get sequence ID from command line
-	selected_sequence_id = XRHelpers.get_training_sequence_id()
+	# Get sequence ID from command line (if not already set by parent)
+	if selected_sequence_id.is_empty():
+		selected_sequence_id = XRHelpers.get_training_sequence_id()
 	if selected_sequence_id.is_empty():
 		selected_sequence_id = "level1_fundamentals"  # Default
 	DebugLogger.info(SOURCE, "Selected sequence: %s" % selected_sequence_id)

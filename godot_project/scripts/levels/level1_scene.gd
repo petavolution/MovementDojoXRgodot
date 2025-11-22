@@ -19,6 +19,7 @@ var right_controller: XRController3D
 # Core components
 var level_controller: Level1Controller
 var drone_spawner: Level1DroneSpawner
+var feedback_ui: Level1Feedback
 var dojo_environment: Node3D
 var active_entities: Node3D
 
@@ -368,6 +369,14 @@ func _setup_level_controller() -> void:
 	# Configure spawner
 	drone_spawner.setup(xr_camera, active_entities)
 
+	# Create feedback UI
+	feedback_ui = Level1Feedback.new()
+	feedback_ui.name = "Level1Feedback"
+	add_child(feedback_ui)
+
+	# Configure feedback
+	feedback_ui.setup(xr_camera)
+
 	# Create level controller
 	level_controller = Level1Controller.new()
 	level_controller.name = "Level1Controller"
@@ -379,12 +388,13 @@ func _setup_level_controller() -> void:
 	level_controller.setup_environment(dojo_environment)
 	level_controller.setup_entities_container(active_entities)
 	level_controller.setup_drone_spawner(drone_spawner)
+	level_controller.setup_feedback(feedback_ui)
 
 	# Connect signals
 	level_controller.level_completed.connect(_on_level_completed)
 	level_controller.state_changed.connect(_on_state_changed)
 
-	DebugLogger.debug(SOURCE, "Level controller and drone spawner configured")
+	DebugLogger.debug(SOURCE, "Level controller, spawner, and feedback configured")
 
 
 # =============================================================================

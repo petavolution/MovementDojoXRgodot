@@ -121,6 +121,9 @@ var active_entities: Node3D
 # Drone spawner reference
 var drone_spawner: Level1DroneSpawner
 
+# Feedback UI reference
+var feedback_ui: Level1Feedback
+
 # Drill completion tracking
 var _saber_drill_complete := false
 var _blaster_drill_complete := false
@@ -271,10 +274,17 @@ func setup_drone_spawner(spawner: Level1DroneSpawner) -> void:
 		drone_spawner.projectile_blocked.connect(_on_spawner_projectile_blocked)
 		drone_spawner.projectile_hit_player.connect(_on_spawner_projectile_hit_player)
 		drone_spawner.dive_completed.connect(_on_spawner_dive_completed)
+		drone_spawner.dive_started.connect(_on_spawner_dive_started)
 		drone_spawner.all_drones_destroyed.connect(_on_all_drones_destroyed)
 		DebugLogger.debug(SOURCE, "Drone spawner: OK")
 	else:
 		DebugLogger.warn(SOURCE, "Drone spawner: MISSING (drills will use timeout mode)")
+
+
+## Setup feedback UI reference
+func setup_feedback(feedback: Level1Feedback) -> void:
+	feedback_ui = feedback
+	DebugLogger.debug(SOURCE, "Feedback UI: %s" % ("OK" if feedback_ui else "MISSING"))
 
 
 # =============================================================================
@@ -357,8 +367,9 @@ func _enter_intro() -> void:
 	if lightsaber and lightsaber.has_method("show_hilt"):
 		lightsaber.show_hilt()
 
-	# TODO: Show world-space instruction text panel
-	# TODO: Play intro audio cue
+	# Show intro prompt
+	if feedback_ui:
+		feedback_ui.show_intro_prompt()
 
 
 func _process_intro(_delta: float) -> void:
@@ -390,6 +401,10 @@ func _enter_saber_drill() -> void:
 	DebugLogger.info(SOURCE, "")
 
 	_saber_drill_complete = false
+
+	# Show drill instruction
+	if feedback_ui:
+		feedback_ui.show_saber_drill_prompt(saber_projectiles_required)
 
 	# Spawn drones that fire projectiles
 	if drone_spawner:
@@ -450,6 +465,10 @@ func _enter_blaster_drill() -> void:
 	DebugLogger.info(SOURCE, "")
 
 	_blaster_drill_complete = false
+
+	# Show drill instruction
+	if feedback_ui:
+		feedback_ui.show_blaster_drill_prompt(blaster_targets_required)
 
 	# Spawn target drones (non-shooting)
 	if drone_spawner:
@@ -517,6 +536,10 @@ func _enter_mixed_drill() -> void:
 	DebugLogger.info(SOURCE, "")
 
 	_mixed_drill_complete = false
+
+	# Show drill instruction
+	if feedback_ui:
+		feedback_ui.show_mixed_drill_prompt(mixed_drones_required, mixed_dive_required)
 
 	# Spawn mixed drones (shooters + optional dive)
 	if drone_spawner:
@@ -611,8 +634,9 @@ func _enter_summary() -> void:
 	DebugLogger.info(SOURCE, "")
 	DebugLogger.info(SOURCE, "Press MENU to exit, or TRIGGER to restart")
 
-	# TODO: Show world-space summary panel
-	# TODO: Play completion audio
+	# Show summary panel
+	if feedback_ui:
+		feedback_ui.show_summary(stats)
 
 
 func _process_summary(_delta: float) -> void:
@@ -624,7 +648,9 @@ func _process_summary(_delta: float) -> void:
 
 
 func _exit_summary() -> void:
-	pass
+	# Clear summary display
+	if feedback_ui:
+		feedback_ui.clear_summary()
 
 
 # =============================================================================
@@ -774,21 +800,28 @@ func _on_dive_blocked(_droid: Node3D) -> void:
 # =============================================================================
 
 ## Called when spawner reports a drone destroyed
-func _on_spawner_drone_destroyed(drone: SimpleDrone, by_player: bool) -> void:
+func _on_spawner_drone_destroyed(_drone: SimpleDrone, by_player: bool) -> void:
 	if not by_player:
 		return  # Don't count self-destructs
 
-	# Track based on current state
+	# Track based on current state and show feedback
 	match current_state:
 		Level1State.SABER_DRILL:
 			stats.saber_targets_hit += 1
 			DebugLogger.debug(SOURCE, "Saber target destroyed! (%d)" % stats.saber_targets_hit)
+			if feedback_ui:
+				feedback_ui.show_destroyed_feedback()
 		Level1State.BLASTER_DRILL:
 			stats.blaster_hits += 1
 			DebugLogger.debug(SOURCE, "Blaster target destroyed! (%d/%d)" % [stats.blaster_hits, blaster_targets_required])
+			if feedback_ui:
+				feedback_ui.show_hit_feedback()
+				feedback_ui.show_progress(stats.blaster_hits, blaster_targets_required, "destroyed")
 		Level1State.MIXED_DRILL:
 			stats.mixed_drones_destroyed += 1
 			DebugLogger.debug(SOURCE, "Mixed drone destroyed! (%d/%d)" % [stats.mixed_drones_destroyed, mixed_drones_required])
+			if feedback_ui:
+				feedback_ui.show_destroyed_feedback()
 
 
 ## Called when spawner reports a projectile was blocked/deflected
@@ -796,22 +829,44 @@ func _on_spawner_projectile_blocked(_projectile: Projectile) -> void:
 	stats.saber_projectiles_blocked += 1
 	DebugLogger.info(SOURCE, "PROJECTILE BLOCKED! (%d/%d)" % [stats.saber_projectiles_blocked, saber_projectiles_required])
 
+	# Show visual feedback
+	if feedback_ui:
+		feedback_ui.show_blocked_feedback()
+		feedback_ui.show_progress(stats.saber_projectiles_blocked, saber_projectiles_required, "blocked")
+
 
 ## Called when spawner reports a projectile hit the player
 func _on_spawner_projectile_hit_player(_projectile: Projectile) -> void:
 	stats.saber_projectiles_missed += 1
 	DebugLogger.debug(SOURCE, "Projectile hit player (missed block)")
 
+	# Show feedback
+	if feedback_ui:
+		feedback_ui.show_player_hit_feedback()
+
+
+## Called when spawner reports a dive started
+func _on_spawner_dive_started(_drone: SimpleDrone) -> void:
+	DebugLogger.warn(SOURCE, "DIVE ATTACK INCOMING!")
+
+	# Show warning
+	if feedback_ui:
+		feedback_ui.show_dive_warning()
+
 
 ## Called when spawner reports a dive completed
-func _on_spawner_dive_completed(drone: SimpleDrone, hit_player: bool) -> void:
+func _on_spawner_dive_completed(_drone: SimpleDrone, hit_player: bool) -> void:
 	if hit_player:
 		# Player got hit by dive - that's a miss for them
 		DebugLogger.warn(SOURCE, "DIVE HIT PLAYER! Ouch!")
+		if feedback_ui:
+			feedback_ui.show_player_hit_feedback()
 	else:
 		# Player dodged or the dive timed out - count as blocked
 		stats.mixed_dive_blocked = true
 		DebugLogger.info(SOURCE, "DIVE ATTACK EVADED/BLOCKED!")
+		if feedback_ui:
+			feedback_ui.show_dive_evaded_feedback()
 
 
 ## Called when all drones are destroyed

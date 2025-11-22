@@ -1,8 +1,10 @@
 ## Main VR Scene - Entry point and scene management
 ## Initializes XR, sets up tracking, and manages game state
+## Enhanced with robust OpenXR error handling for Quest 3 + Virtual Desktop + SteamVR
 extends Node3D
 
 const SOURCE := "MainVR"
+const XR_STARTUP_STEPS := 5
 
 enum GameState {
 	INITIALIZING,
@@ -33,6 +35,8 @@ var current_state := GameState.INITIALIZING
 var xr_interface: XRInterface
 var xr_initialized := false
 var desktop_mode := false
+var xr_init_state := XRHelpers.XRInitState.NOT_STARTED
+var xr_startup_results: XRHelpers.DiagnosticResults
 
 # Desktop mode settings
 var mouse_sensitivity := 0.003
@@ -43,7 +47,14 @@ var systems: SystemsManager
 
 
 func _ready() -> void:
+	# Check for VR diagnostics mode
+	if XRHelpers.has_diagnostics_flag():
+		DebugLogger.info(SOURCE, "VR Diagnostics mode detected - switching to diagnostics scene")
+		get_tree().change_scene_to_file("res://scenes/vr_diagnostics.tscn")
+		return
+
 	DebugLogger.info(SOURCE, "=== Starting initialization ===")
+	xr_startup_results = XRHelpers.DiagnosticResults.new()
 
 	# 1. CRITICAL: Validate required XR nodes exist BEFORE anything else
 	DebugLogger.debug(SOURCE, "Step 1: Validating scene structure")
@@ -51,9 +62,9 @@ func _ready() -> void:
 		DebugLogger.error(SOURCE, "Scene structure validation failed - aborting")
 		return
 
-	# 2. Initialize XR EARLY (sets viewport mode before first render)
-	DebugLogger.debug(SOURCE, "Step 2: Initializing XR")
-	_initialize_xr()
+	# 2. Initialize XR EARLY with enhanced error handling
+	DebugLogger.debug(SOURCE, "Step 2: Initializing OpenXR")
+	_initialize_xr_enhanced()
 
 	# 3. Setup systems manager (for lazy-loading)
 	DebugLogger.debug(SOURCE, "Step 3: Creating SystemsManager")
@@ -171,41 +182,136 @@ func _handle_desktop_input(delta: float) -> void:
 		right_controller.global_position = xr_camera.global_position + xr_camera.global_transform.basis * Vector3(0.3, -0.2, -0.4)
 
 
-func _initialize_xr() -> void:
+func _initialize_xr_enhanced() -> void:
+	DebugLogger.info(SOURCE, "=== OPENXR STARTUP SEQUENCE ===")
+	xr_init_state = XRHelpers.XRInitState.FINDING_INTERFACE
+
+	# Step 1: Find OpenXR interface
+	XRHelpers.log_startup_step(1, XR_STARTUP_STEPS, "Finding OpenXR interface")
 	xr_interface = XRServer.find_interface("OpenXR")
 
-	if xr_interface == null:
-		DebugLogger.warn(SOURCE, "OpenXR interface not found")
+	var check := XRHelpers.check_interface_exists(xr_interface, "xrFindInterface")
+	if not check.success:
+		xr_startup_results.openxr_available = false
+		xr_startup_results.failure_reason = "OpenXR interface not found"
+		xr_init_state = XRHelpers.XRInitState.FAILED
 		_fallback_to_desktop()
 		return
+
+	xr_startup_results.openxr_available = true
+	XRHelpers.log_startup_result(1, true, "OpenXR interface found")
+
+	# Step 2: Query runtime properties
+	XRHelpers.log_startup_step(2, XR_STARTUP_STEPS, "Querying runtime properties")
+	xr_init_state = XRHelpers.XRInitState.CHECKING_RUNTIME
+
+	var runtime_info := XRHelpers.detect_runtime()
+	xr_startup_results.runtime_name = runtime_info.name
+	xr_startup_results.runtime_version = xr_interface.get_name()
+	xr_startup_results.graphics_api = XRHelpers.get_graphics_api_name()
+
+	XRHelpers.log_runtime_properties(xr_startup_results.runtime_name, xr_startup_results.runtime_version)
+	DebugLogger.info(SOURCE, "Graphics API: %s" % xr_startup_results.graphics_api)
+	XRHelpers.log_startup_result(2, true)
+
+	# Step 3: Initialize OpenXR (creates instance, gets system/HMD)
+	XRHelpers.log_startup_step(3, XR_STARTUP_STEPS, "Initializing OpenXR (instance + system)")
+	xr_init_state = XRHelpers.XRInitState.INITIALIZING
 
 	# CRITICAL: Set viewport to XR mode BEFORE initializing
 	# This ensures first frame renders correctly in stereo
 	get_viewport().use_xr = true
 
-	# Handle both fresh init and already-initialized cases
 	var init_success := xr_interface.is_initialized()
 	if not init_success:
 		init_success = xr_interface.initialize()
 
-	if init_success:
-		DebugLogger.info(SOURCE, "OpenXR %s" % ("already initialized" if xr_interface.is_initialized() else "initialized"))
-
-		# Sync physics rate to display refresh (90Hz typical for VR)
-		var refresh_rate := xr_interface.get_display_refresh_rate()
-		if refresh_rate > 0:
-			Engine.physics_ticks_per_second = int(refresh_rate)
-			DebugLogger.info(SOURCE, "Physics rate synced to display: %d Hz" % int(refresh_rate))
-		else:
-			# Fallback to standard VR rate
-			Engine.physics_ticks_per_second = 90
-			DebugLogger.info(SOURCE, "Using default 90Hz physics rate")
-
-		xr_initialized = true
-		DebugLogger.info(SOURCE, "XR rendering enabled")
-	else:
-		DebugLogger.error(SOURCE, "Failed to initialize OpenXR!")
+	check = XRHelpers.xr_check(init_success, "xrInitialize")
+	if not check.success:
+		xr_startup_results.hmd_detected = false
+		xr_startup_results.failure_reason = "OpenXR initialization failed - HMD may not be connected"
+		xr_init_state = XRHelpers.XRInitState.FAILED
 		_fallback_to_desktop()
+		return
+
+	xr_startup_results.hmd_detected = true
+	XRHelpers.log_startup_result(3, true, "HMD detected and bound")
+
+	# Query system properties
+	_query_xr_system_properties()
+
+	# Step 4: Configure display
+	XRHelpers.log_startup_step(4, XR_STARTUP_STEPS, "Configuring display and view")
+	xr_init_state = XRHelpers.XRInitState.CONFIGURING_DISPLAY
+
+	# Sync physics rate to display refresh (90Hz typical for VR)
+	var refresh_rate := xr_interface.get_display_refresh_rate()
+	if refresh_rate > 0:
+		xr_startup_results.refresh_rate = refresh_rate
+		Engine.physics_ticks_per_second = int(refresh_rate)
+		DebugLogger.info(SOURCE, "Physics rate synced to display: %d Hz" % int(refresh_rate))
+	else:
+		xr_startup_results.refresh_rate = 90.0
+		Engine.physics_ticks_per_second = 90
+		DebugLogger.info(SOURCE, "Using default 90Hz physics rate")
+
+	# Get render target size
+	var render_size := xr_interface.get_render_target_size()
+	xr_startup_results.resolution_per_eye = Vector2i(int(render_size.x), int(render_size.y))
+
+	XRHelpers.log_startup_result(4, true, "%.0fHz @ %dx%d" % [
+		xr_startup_results.refresh_rate,
+		xr_startup_results.resolution_per_eye.x,
+		xr_startup_results.resolution_per_eye.y
+	])
+
+	# Step 5: Verify session ready
+	XRHelpers.log_startup_step(5, XR_STARTUP_STEPS, "Verifying session ready")
+	xr_init_state = XRHelpers.XRInitState.STARTING_SESSION
+
+	# Check action map
+	var action_map_path := ProjectSettings.get_setting("xr/openxr/default_action_map", "")
+	if action_map_path and ResourceLoader.exists(action_map_path):
+		DebugLogger.info(SOURCE, "Action map: %s" % action_map_path)
+	else:
+		DebugLogger.warn(SOURCE, "Action map not found - controller bindings may not work")
+
+	xr_initialized = true
+	xr_init_state = XRHelpers.XRInitState.READY
+	XRHelpers.log_startup_result(5, true, "Session ready")
+
+	# Log startup summary
+	DebugLogger.info(SOURCE, "")
+	XRHelpers.log_startup_summary(xr_startup_results)
+	DebugLogger.info(SOURCE, "XR rendering enabled")
+
+
+func _query_xr_system_properties() -> void:
+	# Query HMD/system info
+	xr_startup_results.hmd_system_name = xr_interface.get_name()
+
+	# Form factor
+	var form_factor_setting := ProjectSettings.get_setting("xr/openxr/form_factor", 0)
+	match form_factor_setting:
+		0: xr_startup_results.form_factor = "Head-Mounted Display"
+		1: xr_startup_results.form_factor = "Handheld"
+		_: xr_startup_results.form_factor = "Unknown"
+
+	# View configuration
+	var view_config := ProjectSettings.get_setting("xr/openxr/view_configuration", 1)
+	match view_config:
+		1: xr_startup_results.view_configuration = "Stereo"
+		2: xr_startup_results.view_configuration = "Mono"
+		_: xr_startup_results.view_configuration = "Config %d" % view_config
+
+	# Foveation
+	xr_startup_results.foveation_level = ProjectSettings.get_setting("xr/openxr/foveation_level", -1)
+
+	XRHelpers.log_system_properties(
+		xr_startup_results.hmd_system_name,
+		xr_startup_results.hmd_vendor_id,
+		xr_startup_results.form_factor
+	)
 
 
 func _fallback_to_desktop() -> void:

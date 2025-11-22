@@ -118,6 +118,14 @@ var dojo_environment: Node3D
 # Active entities container
 var active_entities: Node3D
 
+# Drone spawner reference
+var drone_spawner: Level1DroneSpawner
+
+# Drill completion tracking
+var _saber_drill_complete := false
+var _blaster_drill_complete := false
+var _mixed_drill_complete := false
+
 # =============================================================================
 # LIFECYCLE
 # =============================================================================
@@ -253,6 +261,22 @@ func setup_entities_container(container: Node3D) -> void:
 	DebugLogger.debug(SOURCE, "Entities container: %s" % ("OK" if active_entities else "MISSING"))
 
 
+## Setup drone spawner reference
+func setup_drone_spawner(spawner: Level1DroneSpawner) -> void:
+	drone_spawner = spawner
+
+	if drone_spawner:
+		# Connect spawner signals for stats tracking
+		drone_spawner.drone_destroyed.connect(_on_spawner_drone_destroyed)
+		drone_spawner.projectile_blocked.connect(_on_spawner_projectile_blocked)
+		drone_spawner.projectile_hit_player.connect(_on_spawner_projectile_hit_player)
+		drone_spawner.dive_completed.connect(_on_spawner_dive_completed)
+		drone_spawner.all_drones_destroyed.connect(_on_all_drones_destroyed)
+		DebugLogger.debug(SOURCE, "Drone spawner: OK")
+	else:
+		DebugLogger.warn(SOURCE, "Drone spawner: MISSING (drills will use timeout mode)")
+
+
 # =============================================================================
 # STATE MACHINE
 # =============================================================================
@@ -361,34 +385,42 @@ func _exit_intro() -> void:
 func _enter_saber_drill() -> void:
 	DebugLogger.info(SOURCE, "")
 	DebugLogger.info(SOURCE, "=== SABER DRILL ===")
-	DebugLogger.info(SOURCE, "Objective: Hit targets and block incoming projectiles")
-	DebugLogger.info(SOURCE, "  Targets to hit: %d" % saber_targets_required)
+	DebugLogger.info(SOURCE, "Objective: Block incoming projectiles with your saber!")
 	DebugLogger.info(SOURCE, "  Projectiles to block: %d" % saber_projectiles_required)
 	DebugLogger.info(SOURCE, "")
 
-	# Activate lightsaber if player hasn't already
-	if lightsaber and lightsaber.has_method("activate"):
-		# Don't force activate - let player do it
-		pass
+	_saber_drill_complete = false
 
-	# TODO: Spawn saber targets
-	# TODO: Spawn slow projectiles to block
-	# TODO: Connect to target_destroyed and projectile_blocked signals
+	# Spawn drones that fire projectiles
+	if drone_spawner:
+		drone_spawner.spawn_saber_drill_drones()
+	else:
+		DebugLogger.warn(SOURCE, "No drone spawner - using timeout mode")
 
 
 func _process_saber_drill(_delta: float) -> void:
-	# Check completion conditions (placeholder - will check actual counts later)
-	var targets_done := stats.saber_targets_hit >= saber_targets_required
-	var blocks_done := stats.saber_projectiles_blocked >= saber_projectiles_required
+	# Check completion: blocked enough projectiles
+	if stats.saber_projectiles_blocked >= saber_projectiles_required:
+		if not _saber_drill_complete:
+			_saber_drill_complete = true
+			DebugLogger.info(SOURCE, "Saber drill objective complete! Transitioning...")
+			# Brief pause before advancing
+			await get_tree().create_timer(1.0).timeout
+			_change_state(Level1State.BLASTER_DRILL)
+		return
 
-	# For now, auto-advance after 10 seconds (placeholder)
-	if state_elapsed >= 10.0:
-		DebugLogger.debug(SOURCE, "Saber drill auto-advancing (placeholder timeout)")
+	# Timeout fallback (if no spawner or player struggling)
+	if state_elapsed >= 25.0:
+		DebugLogger.debug(SOURCE, "Saber drill timeout - advancing")
 		_change_state(Level1State.BLASTER_DRILL)
 
 
 func _exit_saber_drill() -> void:
 	stats.saber_duration = state_elapsed
+
+	# Despawn remaining drones
+	if drone_spawner:
+		drone_spawner.despawn_all()
 
 	var phase_stats := {
 		"targets_hit": stats.saber_targets_hit,
@@ -398,14 +430,12 @@ func _exit_saber_drill() -> void:
 		"duration": state_elapsed
 	}
 
-	DebugLogger.info(SOURCE, "Saber Drill complete: %d/%d hits, %d/%d blocks in %.1fs" % [
-		stats.saber_targets_hit, saber_targets_required,
+	DebugLogger.info(SOURCE, "Saber Drill complete: %d/%d blocks in %.1fs" % [
 		stats.saber_projectiles_blocked, saber_projectiles_required,
 		state_elapsed
 	])
 
 	phase_completed.emit(Level1State.SABER_DRILL, phase_stats)
-	_cleanup_active_entities()
 
 
 # =============================================================================
@@ -415,49 +445,62 @@ func _exit_saber_drill() -> void:
 func _enter_blaster_drill() -> void:
 	DebugLogger.info(SOURCE, "")
 	DebugLogger.info(SOURCE, "=== BLASTER DRILL ===")
-	DebugLogger.info(SOURCE, "Objective: Shoot the targets with your blaster")
-	DebugLogger.info(SOURCE, "  Targets to destroy: %d" % blaster_targets_required)
+	DebugLogger.info(SOURCE, "Objective: Destroy the target drones!")
+	DebugLogger.info(SOURCE, "  Drones to destroy: %d" % blaster_targets_required)
 	DebugLogger.info(SOURCE, "")
 
-	if blaster == null:
-		DebugLogger.warn(SOURCE, "Blaster not available - drill will use placeholder mode")
+	_blaster_drill_complete = false
 
-	# TODO: Spawn blaster targets (slow-moving drones)
-	# TODO: Connect to blaster_hit and target_destroyed signals
+	# Spawn target drones (non-shooting)
+	if drone_spawner:
+		drone_spawner.spawn_blaster_drill_drones()
+	else:
+		DebugLogger.warn(SOURCE, "No drone spawner - using timeout mode")
 
 
 func _process_blaster_drill(_delta: float) -> void:
-	# Check completion conditions
-	var targets_done := stats.blaster_hits >= blaster_targets_required
+	# Check completion: destroyed enough drones
+	if stats.blaster_hits >= blaster_targets_required:
+		if not _blaster_drill_complete:
+			_blaster_drill_complete = true
+			DebugLogger.info(SOURCE, "Blaster drill objective complete! Transitioning...")
+			await get_tree().create_timer(1.0).timeout
+			_change_state(Level1State.MIXED_DRILL)
+		return
 
-	# For now, auto-advance after 10 seconds (placeholder)
-	if state_elapsed >= 10.0:
-		DebugLogger.debug(SOURCE, "Blaster drill auto-advancing (placeholder timeout)")
+	# Also complete if all drones destroyed (even if fewer than required)
+	if drone_spawner and not drone_spawner.has_active_drones() and stats.blaster_hits > 0:
+		if not _blaster_drill_complete:
+			_blaster_drill_complete = true
+			DebugLogger.info(SOURCE, "All drones destroyed! Transitioning...")
+			await get_tree().create_timer(1.0).timeout
+			_change_state(Level1State.MIXED_DRILL)
+		return
+
+	# Timeout fallback
+	if state_elapsed >= 30.0:
+		DebugLogger.debug(SOURCE, "Blaster drill timeout - advancing")
 		_change_state(Level1State.MIXED_DRILL)
 
 
 func _exit_blaster_drill() -> void:
 	stats.blaster_duration = state_elapsed
 
-	var accuracy := 0.0
-	if stats.blaster_shots_fired > 0:
-		accuracy = float(stats.blaster_hits) / float(stats.blaster_shots_fired) * 100.0
+	# Despawn remaining drones
+	if drone_spawner:
+		drone_spawner.despawn_all()
 
 	var phase_stats := {
-		"shots_fired": stats.blaster_shots_fired,
-		"hits": stats.blaster_hits,
-		"accuracy": accuracy,
+		"drones_destroyed": stats.blaster_hits,
 		"duration": state_elapsed
 	}
 
-	DebugLogger.info(SOURCE, "Blaster Drill complete: %d/%d hits (%.0f%% accuracy) in %.1fs" % [
+	DebugLogger.info(SOURCE, "Blaster Drill complete: %d/%d drones destroyed in %.1fs" % [
 		stats.blaster_hits, blaster_targets_required,
-		accuracy,
 		state_elapsed
 	])
 
 	phase_completed.emit(Level1State.BLASTER_DRILL, phase_stats)
-	_cleanup_active_entities()
 
 
 # =============================================================================
@@ -467,29 +510,56 @@ func _exit_blaster_drill() -> void:
 func _enter_mixed_drill() -> void:
 	DebugLogger.info(SOURCE, "")
 	DebugLogger.info(SOURCE, "=== MIXED DRILL ===")
-	DebugLogger.info(SOURCE, "Objective: Handle drones, projectiles, and a dive attack")
+	DebugLogger.info(SOURCE, "Objective: Handle shooting drones AND a dive attack!")
 	DebugLogger.info(SOURCE, "  Drones to destroy: %d" % mixed_drones_required)
-	DebugLogger.info(SOURCE, "  Block the dive attack!")
+	if mixed_dive_required:
+		DebugLogger.info(SOURCE, "  WARNING: Watch for the DIVE attack!")
 	DebugLogger.info(SOURCE, "")
 
-	# TODO: Spawn drones that shoot slow projectiles
-	# TODO: Spawn one dive-attack drone with heavy telegraph
-	# TODO: Connect to all relevant combat signals
+	_mixed_drill_complete = false
+
+	# Spawn mixed drones (shooters + optional dive)
+	if drone_spawner:
+		drone_spawner.spawn_mixed_drill_drones()
+	else:
+		DebugLogger.warn(SOURCE, "No drone spawner - using timeout mode")
 
 
 func _process_mixed_drill(_delta: float) -> void:
-	# Check completion conditions
+	# Check completion: destroyed enough drones AND handled dive
 	var drones_done := stats.mixed_drones_destroyed >= mixed_drones_required
 	var dive_done := not mixed_dive_required or stats.mixed_dive_blocked
 
-	# For now, auto-advance after 15 seconds (placeholder)
-	if state_elapsed >= 15.0:
-		DebugLogger.debug(SOURCE, "Mixed drill auto-advancing (placeholder timeout)")
+	# Complete when all objectives met
+	if drones_done and dive_done:
+		if not _mixed_drill_complete:
+			_mixed_drill_complete = true
+			DebugLogger.info(SOURCE, "Mixed drill objectives complete! Great work!")
+			await get_tree().create_timer(1.5).timeout
+			_change_state(Level1State.SUMMARY)
+		return
+
+	# Also complete if all drones gone (dive drone self-destructs after dive)
+	if drone_spawner and not drone_spawner.has_active_drones() and stats.mixed_drones_destroyed > 0:
+		if not _mixed_drill_complete:
+			_mixed_drill_complete = true
+			DebugLogger.info(SOURCE, "All threats neutralized! Transitioning...")
+			await get_tree().create_timer(1.5).timeout
+			_change_state(Level1State.SUMMARY)
+		return
+
+	# Timeout fallback
+	if state_elapsed >= 45.0:
+		DebugLogger.debug(SOURCE, "Mixed drill timeout - advancing")
 		_change_state(Level1State.SUMMARY)
 
 
 func _exit_mixed_drill() -> void:
 	stats.mixed_duration = state_elapsed
+
+	# Despawn remaining drones
+	if drone_spawner:
+		drone_spawner.despawn_all()
 
 	var phase_stats := {
 		"drones_destroyed": stats.mixed_drones_destroyed,
@@ -504,7 +574,6 @@ func _exit_mixed_drill() -> void:
 	])
 
 	phase_completed.emit(Level1State.MIXED_DRILL, phase_stats)
-	_cleanup_active_entities()
 
 
 # =============================================================================
@@ -698,3 +767,53 @@ func _on_drone_destroyed(_drone: Node3D) -> void:
 func _on_dive_blocked(_droid: Node3D) -> void:
 	stats.mixed_dive_blocked = true
 	DebugLogger.info(SOURCE, "DIVE ATTACK BLOCKED!")
+
+
+# =============================================================================
+# SPAWNER SIGNAL HANDLERS
+# =============================================================================
+
+## Called when spawner reports a drone destroyed
+func _on_spawner_drone_destroyed(drone: SimpleDrone, by_player: bool) -> void:
+	if not by_player:
+		return  # Don't count self-destructs
+
+	# Track based on current state
+	match current_state:
+		Level1State.SABER_DRILL:
+			stats.saber_targets_hit += 1
+			DebugLogger.debug(SOURCE, "Saber target destroyed! (%d)" % stats.saber_targets_hit)
+		Level1State.BLASTER_DRILL:
+			stats.blaster_hits += 1
+			DebugLogger.debug(SOURCE, "Blaster target destroyed! (%d/%d)" % [stats.blaster_hits, blaster_targets_required])
+		Level1State.MIXED_DRILL:
+			stats.mixed_drones_destroyed += 1
+			DebugLogger.debug(SOURCE, "Mixed drone destroyed! (%d/%d)" % [stats.mixed_drones_destroyed, mixed_drones_required])
+
+
+## Called when spawner reports a projectile was blocked/deflected
+func _on_spawner_projectile_blocked(_projectile: Projectile) -> void:
+	stats.saber_projectiles_blocked += 1
+	DebugLogger.info(SOURCE, "PROJECTILE BLOCKED! (%d/%d)" % [stats.saber_projectiles_blocked, saber_projectiles_required])
+
+
+## Called when spawner reports a projectile hit the player
+func _on_spawner_projectile_hit_player(_projectile: Projectile) -> void:
+	stats.saber_projectiles_missed += 1
+	DebugLogger.debug(SOURCE, "Projectile hit player (missed block)")
+
+
+## Called when spawner reports a dive completed
+func _on_spawner_dive_completed(drone: SimpleDrone, hit_player: bool) -> void:
+	if hit_player:
+		# Player got hit by dive - that's a miss for them
+		DebugLogger.warn(SOURCE, "DIVE HIT PLAYER! Ouch!")
+	else:
+		# Player dodged or the dive timed out - count as blocked
+		stats.mixed_dive_blocked = true
+		DebugLogger.info(SOURCE, "DIVE ATTACK EVADED/BLOCKED!")
+
+
+## Called when all drones are destroyed
+func _on_all_drones_destroyed() -> void:
+	DebugLogger.debug(SOURCE, "All active drones destroyed")

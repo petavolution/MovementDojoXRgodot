@@ -41,26 +41,27 @@ func _process(delta: float) -> void:
 
 
 func _setup_multi_mesh() -> void:
-	# Create sphere mesh for heat points
+	# Create low-poly sphere mesh for heat points (optimized for many instances)
 	sphere_mesh = SphereMesh.new()
 	sphere_mesh.radius = point_size
 	sphere_mesh.height = point_size * 2
-	sphere_mesh.radial_segments = 8
-	sphere_mesh.rings = 4
+	sphere_mesh.radial_segments = 6  # Reduced from 8
+	sphere_mesh.rings = 3  # Reduced from 4
 
-	# Create material
+	# Create unshaded material (fast rendering)
 	var material := StandardMaterial3D.new()
 	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	material.vertex_color_use_as_albedo = true
 	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	sphere_mesh.material = material
 
-	# Create MultiMesh
+	# Create MultiMesh with visible_instance_count = 0 (no rendering until data)
 	multi_mesh = MultiMesh.new()
 	multi_mesh.transform_format = MultiMesh.TRANSFORM_3D
 	multi_mesh.use_colors = true
 	multi_mesh.mesh = sphere_mesh
 	multi_mesh.instance_count = max_display_points
+	multi_mesh.visible_instance_count = 0  # Start with nothing visible
 
 	# Create instance
 	multi_mesh_instance = MultiMeshInstance3D.new()
@@ -75,45 +76,37 @@ func _on_movement_frame(frame: MovementFrame) -> void:
 func _update_heat_map() -> void:
 	var space_map := MovementTracker.get_space_map()
 	if space_map == null:
+		multi_mesh.visible_instance_count = 0
 		return
 
 	var heat_data := space_map.get_heat_map_data()
+	if heat_data.is_empty():
+		multi_mesh.visible_instance_count = 0
+		return
 
 	# Limit to max display points
 	var display_count := mini(heat_data.size(), max_display_points)
-	multi_mesh.visible_instance_count = display_count
 
-	if display_count == 0:
-		return
+	# Sort by intensity (show most active first) - only if needed
+	if heat_data.size() > max_display_points:
+		heat_data.sort_custom(func(a, b): return a["intensity"] > b["intensity"])
 
-	# Sort by intensity (optional, show most active first)
-	heat_data.sort_custom(func(a, b): return a["intensity"] > b["intensity"])
-
-	# Update instances
+	# Update visible instances only
 	for i in range(display_count):
 		var data: Dictionary = heat_data[i]
-		var world_pos: Vector3 = data["position"] + _head_position  # Convert relative to world
+		var world_pos: Vector3 = data["position"] + _head_position
 		var intensity: float = data["intensity"]
 
-		# Set transform
-		var transform := Transform3D.IDENTITY
+		# Set transform with intensity-based scale
+		var scale := 0.5 + intensity * 0.5
+		var transform := Transform3D.IDENTITY.scaled(Vector3(scale, scale, scale))
 		transform.origin = world_pos
 
-		# Scale by intensity
-		var scale := 0.5 + intensity * 0.5
-		transform = transform.scaled(Vector3(scale, scale, scale))
-
 		multi_mesh.set_instance_transform(i, transform)
+		multi_mesh.set_instance_color(i, _intensity_to_color(intensity))
 
-		# Set color based on intensity
-		var color := _intensity_to_color(intensity)
-		multi_mesh.set_instance_color(i, color)
-
-	# Hide remaining instances
-	for i in range(display_count, max_display_points):
-		var transform := Transform3D.IDENTITY
-		transform.origin = Vector3(0, -1000, 0)  # Move far away
-		multi_mesh.set_instance_transform(i, transform)
+	# visible_instance_count automatically hides instances beyond this count
+	multi_mesh.visible_instance_count = display_count
 
 
 func _intensity_to_color(intensity: float) -> Color:

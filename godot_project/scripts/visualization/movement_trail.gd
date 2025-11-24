@@ -1,42 +1,56 @@
 ## MovementTrail - Renders ghost trails for hand movement visualization
-## Attach to XROrigin3D or scene root
+## Optimized with ring buffer and reduced update frequency
 extends Node3D
 class_name MovementTrail
 
-@export var trail_length := 60  # Number of points (about 0.66s at 90Hz)
+@export var trail_length := 60  # Number of points (~0.66s at 90Hz)
 @export var trail_width := 0.01  # Width in meters
 @export var left_color := Color(0.2, 0.6, 1.0, 0.6)
 @export var right_color := Color(1.0, 0.4, 0.2, 0.6)
 @export var fade_oldest := true
 @export var min_velocity := 0.2  # Only show trail when moving
+@export var update_interval := 2  # Update mesh every N frames (reduces CPU at 90Hz)
 
-# Trail data
+# Ring buffer for trail points (avoids array shifting)
 var left_points: PackedVector3Array
 var right_points: PackedVector3Array
+var write_index := 0
+var points_filled := 0
+
+# Pre-computed colors (no per-frame allocation)
 var left_colors: PackedColorArray
 var right_colors: PackedColorArray
 
 # Mesh instances
-@onready var left_mesh_instance: MeshInstance3D = $LeftTrailMesh
-@onready var right_mesh_instance: MeshInstance3D = $RightTrailMesh
-
+var left_mesh_instance: MeshInstance3D
+var right_mesh_instance: MeshInstance3D
 var left_mesh: ImmediateMesh
 var right_mesh: ImmediateMesh
 
-# Material
+# Material (shared between both trails)
 var trail_material: StandardMaterial3D
+
+# Frame counter for update throttling
+var frame_count := 0
+var needs_update := false
 
 
 func _ready() -> void:
 	_setup_materials()
 	_setup_mesh_instances()
 
+	# Pre-allocate arrays (no resizing during runtime)
+	left_points = PackedVector3Array()
+	right_points = PackedVector3Array()
+	left_colors = PackedColorArray()
+	right_colors = PackedColorArray()
+
 	left_points.resize(trail_length)
 	right_points.resize(trail_length)
 	left_colors.resize(trail_length)
 	right_colors.resize(trail_length)
 
-	# Initialize colors
+	# Pre-compute colors (oldest to newest)
 	for i in range(trail_length):
 		var alpha := float(i) / trail_length if fade_oldest else 1.0
 		left_colors[i] = Color(left_color.r, left_color.g, left_color.b, left_color.a * alpha)
@@ -44,7 +58,7 @@ func _ready() -> void:
 
 	GameEvents.movement_frame_recorded.connect(_on_movement_frame)
 
-	# Visibility based on settings
+	# Initial visibility from settings
 	visible = SessionManager.get_settings().get("trail_visible", true)
 
 
@@ -59,13 +73,15 @@ func _setup_materials() -> void:
 
 
 func _setup_mesh_instances() -> void:
-	# Create mesh instances if not in scene
-	if not has_node("LeftTrailMesh"):
+	# Get or create mesh instances
+	left_mesh_instance = get_node_or_null("LeftTrailMesh")
+	if left_mesh_instance == null:
 		left_mesh_instance = MeshInstance3D.new()
 		left_mesh_instance.name = "LeftTrailMesh"
 		add_child(left_mesh_instance)
 
-	if not has_node("RightTrailMesh"):
+	right_mesh_instance = get_node_or_null("RightTrailMesh")
+	if right_mesh_instance == null:
 		right_mesh_instance = MeshInstance3D.new()
 		right_mesh_instance.name = "RightTrailMesh"
 		add_child(right_mesh_instance)
@@ -81,51 +97,68 @@ func _setup_mesh_instances() -> void:
 
 
 func _on_movement_frame(frame: MovementFrame) -> void:
-	# Shift points
-	for i in range(trail_length - 1, 0, -1):
-		left_points[i] = left_points[i - 1]
-		right_points[i] = right_points[i - 1]
+	# Skip if not visible (no point recording data we won't render)
+	if not visible:
+		return
 
-	# Add new points
-	left_points[0] = frame.left_position
-	right_points[0] = frame.right_position
+	# Store new point in ring buffer (O(1) instead of O(n) shift)
+	left_points[write_index] = frame.left_position
+	right_points[write_index] = frame.right_position
 
-	# Update meshes
-	_update_trail_mesh(left_mesh, left_points, left_colors, frame.left_velocity.length())
-	_update_trail_mesh(right_mesh, right_points, right_colors, frame.right_velocity.length())
+	write_index = (write_index + 1) % trail_length
+	points_filled = mini(points_filled + 1, trail_length)
+
+	# Throttle mesh updates (every N frames)
+	frame_count += 1
+	if frame_count >= update_interval:
+		frame_count = 0
+		_update_meshes(frame.left_velocity.length(), frame.right_velocity.length())
+
+
+func _update_meshes(left_velocity: float, right_velocity: float) -> void:
+	_update_trail_mesh(left_mesh, left_points, left_colors, left_velocity)
+	_update_trail_mesh(right_mesh, right_points, right_colors, right_velocity)
 
 
 func _update_trail_mesh(mesh: ImmediateMesh, points: PackedVector3Array, colors: PackedColorArray, velocity: float) -> void:
 	mesh.clear_surfaces()
 
-	# Don't render if moving too slowly
-	if velocity < min_velocity:
-		return
-
-	var valid_points := 0
-	for i in range(points.size()):
-		if points[i] != Vector3.ZERO:
-			valid_points += 1
-
-	if valid_points < 2:
+	# Don't render if too slow or not enough points
+	if velocity < min_velocity or points_filled < 2:
 		return
 
 	mesh.surface_begin(Mesh.PRIMITIVE_LINE_STRIP)
 
-	for i in range(valid_points):
-		if points[i] == Vector3.ZERO:
+	# Read ring buffer from oldest to newest
+	var count := points_filled
+	for i in range(count):
+		# Calculate ring buffer index (oldest first)
+		var buf_idx := (write_index - count + i + trail_length) % trail_length
+		var point := points[buf_idx]
+
+		if point == Vector3.ZERO:
 			continue
-		mesh.surface_set_color(colors[i])
-		mesh.surface_add_vertex(points[i])
+
+		# Color index maps to age (0 = oldest, count-1 = newest)
+		var color_idx := int(float(i) / count * (trail_length - 1))
+		mesh.surface_set_color(colors[color_idx])
+		mesh.surface_add_vertex(point)
 
 	mesh.surface_end()
 
 
 func set_visibility(visible_: bool) -> void:
 	visible = visible_
+	if not visible:
+		# Clear meshes when hidden
+		left_mesh.clear_surfaces()
+		right_mesh.clear_surfaces()
 
 
 func clear_trails() -> void:
+	write_index = 0
+	points_filled = 0
+
 	for i in range(trail_length):
 		left_points[i] = Vector3.ZERO
 		right_points[i] = Vector3.ZERO

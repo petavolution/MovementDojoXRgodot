@@ -50,6 +50,10 @@ var current_tip_velocity := Vector3.ZERO
 var velocity_history: Array[float] = []
 const VELOCITY_HISTORY_SIZE := 10
 
+# Input tracking
+var trigger_pressed := false
+const TRIGGER_THRESHOLD := 0.7  # Trigger press threshold (0.0-1.0)
+
 # Materials
 var blade_material: ShaderMaterial
 var hilt_material: StandardMaterial3D
@@ -62,11 +66,15 @@ func _ready() -> void:
 	_setup_light()
 	_setup_audio()
 
-	# Find controller parent
+	# Find controller parent and connect input signals
 	var parent := get_parent()
 	if parent is XRController3D:
 		controller = parent
 		controller.button_pressed.connect(_on_button_pressed)
+		controller.input_float_changed.connect(_on_input_float_changed)
+		DebugLogger.debug("Lightsaber", "Controller connected: %s" % parent.name)
+	else:
+		DebugLogger.warn("Lightsaber", "Parent is not XRController3D - activation via input disabled")
 
 
 func _physics_process(delta: float) -> void:
@@ -352,9 +360,20 @@ func _trigger_haptic(intensity: float = -1.0) -> void:
 
 
 func _on_button_pressed(button: String) -> void:
-	# Toggle saber with trigger or A/X button
-	if button == "trigger_click" or button == "ax_button":
+	# Toggle saber with A/X button
+	if button == "ax_button":
 		toggle()
+
+
+func _on_input_float_changed(name: String, value: float) -> void:
+	# Handle trigger as analog input (detect press/release)
+	if name == "trigger":
+		var was_pressed := trigger_pressed
+		trigger_pressed = value > TRIGGER_THRESHOLD
+
+		# Toggle on press (not release)
+		if trigger_pressed and not was_pressed:
+			toggle()
 
 
 func _on_blade_body_entered(body: Node3D) -> void:

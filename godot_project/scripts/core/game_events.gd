@@ -1,6 +1,14 @@
 ## Game Events - Global signal bus for decoupled communication
 ## Autoloaded as "GameEvents"
 extends Node
+class_name GameEventsClass
+
+const SOURCE := "GameEvents"
+
+
+func _ready() -> void:
+	DebugLogger.info(SOURCE, "GameEvents signal bus initialized")
+
 
 # Movement events
 signal movement_frame_recorded(frame: MovementFrame)

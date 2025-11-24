@@ -1,5 +1,6 @@
-## XRInputManager - Centralized VR input handling
+## XRInputManager - Centralized VR input handling for Dojo combat
 ## Supports controllers and hand tracking with gesture recognition
+## Enhanced with detailed action logging for Quest 3 + SteamVR debugging
 class_name XRInputManager
 extends Node
 
@@ -13,6 +14,8 @@ signal thumbstick_moved(hand: Hand, position: Vector2)
 signal gesture_detected(hand: Hand, gesture: Gesture)
 signal hand_tracking_started
 signal hand_tracking_lost
+signal controller_tracking_lost(hand: Hand)
+signal controller_tracking_restored(hand: Hand)
 
 enum Hand { LEFT, RIGHT }
 enum Gesture { NONE, FIST, OPEN_PALM, POINT, THUMBS_UP, PEACE, GRAB, PINCH }
@@ -51,6 +54,63 @@ var gesture_confidence_threshold: float = 0.7
 const TRIGGER_THRESHOLD := 0.7
 const GRIP_THRESHOLD := 0.7
 const THUMBSTICK_DEADZONE := 0.15
+const SOURCE := "XRInput"
+
+# =============================================================================
+# POSE TRACKING STATE (for combat debugging)
+# =============================================================================
+
+## Frames without valid tracking before warning
+const TRACKING_LOST_THRESHOLD := 90  # ~1 second at 90Hz
+
+## Pose tracking state
+var _left_untracked_frames: int = 0
+var _right_untracked_frames: int = 0
+var _left_tracking_warned: bool = false
+var _right_tracking_warned: bool = false
+var _left_was_active: bool = false
+var _right_was_active: bool = false
+
+## First-time binding detection
+var _left_first_active: bool = false
+var _right_first_active: bool = false
+var _left_trigger_first_bound: bool = false
+var _right_trigger_first_bound: bool = false
+var _left_grip_first_bound: bool = false
+var _right_grip_first_bound: bool = false
+
+# =============================================================================
+# DOJO ACTION DEFINITIONS
+# =============================================================================
+
+## Action roles for logging (maps to future combat system)
+const DOJO_ACTIONS := {
+	"left_hand": {
+		"pose": {"type": "pose", "role": "LeftHandPose (blaster)", "binding": "/user/hand/left/input/grip/pose"},
+		"trigger": {"type": "float", "role": "BlasterFire", "binding": "/user/hand/left/input/trigger/value"},
+		"grip": {"type": "float", "role": "BlasterGrab", "binding": "/user/hand/left/input/squeeze/value"},
+		"thumbstick": {"type": "vector2", "role": "Movement", "binding": "/user/hand/left/input/thumbstick"},
+		"ax_button": {"type": "bool", "role": "BlasterMode", "binding": "/user/hand/left/input/a/click"},
+		"by_button": {"type": "bool", "role": "Menu", "binding": "/user/hand/left/input/b/click"},
+	},
+	"right_hand": {
+		"pose": {"type": "pose", "role": "RightHandPose (saber)", "binding": "/user/hand/right/input/grip/pose"},
+		"trigger": {"type": "float", "role": "SaberActivate", "binding": "/user/hand/right/input/trigger/value"},
+		"grip": {"type": "float", "role": "SaberGrip", "binding": "/user/hand/right/input/squeeze/value"},
+		"thumbstick": {"type": "vector2", "role": "Turn", "binding": "/user/hand/right/input/thumbstick"},
+		"ax_button": {"type": "bool", "role": "SaberThrow", "binding": "/user/hand/right/input/a/click"},
+		"by_button": {"type": "bool", "role": "ForceAbility", "binding": "/user/hand/right/input/b/click"},
+	}
+}
+
+## Supported interaction profiles
+const INTERACTION_PROFILES := [
+	"/interaction_profiles/oculus/touch_controller",      # Quest 3 / Quest Pro
+	"/interaction_profiles/valve/index_controller",       # Valve Index
+	"/interaction_profiles/htc/vive_controller",          # HTC Vive
+	"/interaction_profiles/microsoft/motion_controller", # WMR
+	"/interaction_profiles/khr/simple_controller",       # Fallback
+]
 
 ## Hand joint indices (OpenXR standard)
 enum HandJoint {
@@ -84,6 +144,8 @@ enum HandJoint {
 
 
 func _ready() -> void:
+	DebugLogger.info(SOURCE, "Initializing XRInputManager for dojo combat")
+
 	# Initialize button states
 	for button in ["ax_button", "by_button", "menu_button", "thumbstick_click"]:
 		left_buttons[button] = false
@@ -93,23 +155,38 @@ func _ready() -> void:
 	left_hand_joints.resize(26)
 	right_hand_joints.resize(26)
 
+	# Log action definitions
+	_log_action_definitions()
+
+	DebugLogger.info(SOURCE, "XRInputManager ready")
+
 
 func setup(left_ctrl: XRController3D, right_ctrl: XRController3D) -> void:
+	DebugLogger.info(SOURCE, "=== CONTROLLER SETUP ===")
+
 	left_controller = left_ctrl
 	right_controller = right_ctrl
 
-	# Connect controller signals
+	# Log controller binding status
 	if left_controller:
+		DebugLogger.info(SOURCE, "Left controller (blaster hand): bound to tracker '%s'" % left_controller.tracker)
 		left_controller.button_pressed.connect(_on_left_button_pressed)
 		left_controller.button_released.connect(_on_left_button_released)
 		left_controller.input_float_changed.connect(_on_left_float_changed)
 		left_controller.input_vector2_changed.connect(_on_left_vector2_changed)
+	else:
+		DebugLogger.warn(SOURCE, "Left controller (blaster hand): NOT BOUND")
 
 	if right_controller:
+		DebugLogger.info(SOURCE, "Right controller (saber hand): bound to tracker '%s'" % right_controller.tracker)
 		right_controller.button_pressed.connect(_on_right_button_pressed)
 		right_controller.button_released.connect(_on_right_button_released)
 		right_controller.input_float_changed.connect(_on_right_float_changed)
 		right_controller.input_vector2_changed.connect(_on_right_vector2_changed)
+	else:
+		DebugLogger.warn(SOURCE, "Right controller (saber hand): NOT BOUND")
+
+	DebugLogger.info(SOURCE, "=== END CONTROLLER SETUP ===")
 
 
 func setup_hand_tracking(left_tracker: XRNode3D, right_tracker: XRNode3D) -> void:
@@ -120,9 +197,111 @@ func setup_hand_tracking(left_tracker: XRNode3D, right_tracker: XRNode3D) -> voi
 
 
 func _process(_delta: float) -> void:
+	# Track controller pose validity (for combat debugging)
+	_check_controller_tracking()
+
 	if hand_tracking_active:
 		_update_hand_tracking()
 		_detect_gestures()
+
+
+# =============================================================================
+# POSE TRACKING VALIDATION
+# =============================================================================
+
+func _check_controller_tracking() -> void:
+	# Check left controller (blaster hand)
+	if left_controller:
+		var is_active := left_controller.get_is_active()
+		var has_tracking := left_controller.get_has_tracking_data()
+
+		if is_active and has_tracking:
+			# First time active - log binding success
+			if not _left_first_active:
+				_left_first_active = true
+				DebugLogger.info(SOURCE, "LeftHandPose (blaster): ACTIVE - tracking acquired")
+
+			# Was lost, now restored
+			if _left_tracking_warned:
+				DebugLogger.info(SOURCE, "LeftHandPose (blaster): tracking RESTORED")
+				controller_tracking_restored.emit(Hand.LEFT)
+				_left_tracking_warned = false
+
+			_left_untracked_frames = 0
+			_left_was_active = true
+		else:
+			_left_untracked_frames += 1
+
+			# Log debug if inactive
+			if _left_was_active and _left_untracked_frames == 1:
+				DebugLogger.debug(SOURCE, "LeftHandPose: inactive (active=%s tracking=%s)" % [is_active, has_tracking])
+
+			# Warn after threshold
+			if _left_untracked_frames >= TRACKING_LOST_THRESHOLD and not _left_tracking_warned:
+				DebugLogger.warn(SOURCE, "LeftHandPose (blaster) not tracked for >%d frames (possible tracking/binding issue)" % TRACKING_LOST_THRESHOLD)
+				controller_tracking_lost.emit(Hand.LEFT)
+				_left_tracking_warned = true
+
+	# Check right controller (saber hand)
+	if right_controller:
+		var is_active := right_controller.get_is_active()
+		var has_tracking := right_controller.get_has_tracking_data()
+
+		if is_active and has_tracking:
+			# First time active - log binding success
+			if not _right_first_active:
+				_right_first_active = true
+				DebugLogger.info(SOURCE, "RightHandPose (saber): ACTIVE - tracking acquired")
+
+			# Was lost, now restored
+			if _right_tracking_warned:
+				DebugLogger.info(SOURCE, "RightHandPose (saber): tracking RESTORED")
+				controller_tracking_restored.emit(Hand.RIGHT)
+				_right_tracking_warned = false
+
+			_right_untracked_frames = 0
+			_right_was_active = true
+		else:
+			_right_untracked_frames += 1
+
+			# Log debug if inactive
+			if _right_was_active and _right_untracked_frames == 1:
+				DebugLogger.debug(SOURCE, "RightHandPose: inactive (active=%s tracking=%s)" % [is_active, has_tracking])
+
+			# Warn after threshold
+			if _right_untracked_frames >= TRACKING_LOST_THRESHOLD and not _right_tracking_warned:
+				DebugLogger.warn(SOURCE, "RightHandPose (saber) not tracked for >%d frames (possible tracking/binding issue)" % TRACKING_LOST_THRESHOLD)
+				controller_tracking_lost.emit(Hand.RIGHT)
+				_right_tracking_warned = true
+
+
+# =============================================================================
+# ACTION LOGGING
+# =============================================================================
+
+func _log_action_definitions() -> void:
+	DebugLogger.info(SOURCE, "=== DOJO ACTION BINDINGS ===")
+
+	# Log interaction profiles
+	DebugLogger.info(SOURCE, "Supported interaction profiles:")
+	for profile in INTERACTION_PROFILES:
+		DebugLogger.info(SOURCE, "  - %s" % profile)
+
+	# Log left hand actions (blaster)
+	DebugLogger.info(SOURCE, "")
+	DebugLogger.info(SOURCE, "[Left Hand - Blaster]")
+	for action_name in DOJO_ACTIONS.left_hand:
+		var action: Dictionary = DOJO_ACTIONS.left_hand[action_name]
+		DebugLogger.info(SOURCE, "  %s (%s): %s" % [action_name, action.type, action.role])
+
+	# Log right hand actions (saber)
+	DebugLogger.info(SOURCE, "")
+	DebugLogger.info(SOURCE, "[Right Hand - Saber]")
+	for action_name in DOJO_ACTIONS.right_hand:
+		var action: Dictionary = DOJO_ACTIONS.right_hand[action_name]
+		DebugLogger.info(SOURCE, "  %s (%s): %s" % [action_name, action.type, action.role])
+
+	DebugLogger.info(SOURCE, "=== END ACTION BINDINGS ===")
 
 
 func _update_hand_tracking() -> void:
@@ -251,40 +430,68 @@ func _on_right_button_released(button: String) -> void:
 func _on_left_float_changed(name: String, value: float) -> void:
 	match name:
 		"trigger":
+			# First-time binding detection
+			if not _left_trigger_first_bound and value > 0.01:
+				_left_trigger_first_bound = true
+				DebugLogger.info(SOURCE, "Left trigger (BlasterFire): BOUND - first input received")
+
 			var was_pressed := left_trigger_value >= TRIGGER_THRESHOLD
 			left_trigger_value = value
 			var is_pressed := value >= TRIGGER_THRESHOLD
 			if is_pressed and not was_pressed:
+				DebugLogger.debug(SOURCE, "Left trigger PRESSED (blaster fire)")
 				trigger_pressed.emit(Hand.LEFT)
 			elif not is_pressed and was_pressed:
+				DebugLogger.debug(SOURCE, "Left trigger RELEASED")
 				trigger_released.emit(Hand.LEFT)
 		"grip":
+			# First-time binding detection
+			if not _left_grip_first_bound and value > 0.01:
+				_left_grip_first_bound = true
+				DebugLogger.info(SOURCE, "Left grip (BlasterGrab): BOUND - first input received")
+
 			var was_pressed := left_grip_value >= GRIP_THRESHOLD
 			left_grip_value = value
 			var is_pressed := value >= GRIP_THRESHOLD
 			if is_pressed and not was_pressed:
+				DebugLogger.debug(SOURCE, "Left grip PRESSED")
 				grip_pressed.emit(Hand.LEFT)
 			elif not is_pressed and was_pressed:
+				DebugLogger.debug(SOURCE, "Left grip RELEASED")
 				grip_released.emit(Hand.LEFT)
 
 
 func _on_right_float_changed(name: String, value: float) -> void:
 	match name:
 		"trigger":
+			# First-time binding detection
+			if not _right_trigger_first_bound and value > 0.01:
+				_right_trigger_first_bound = true
+				DebugLogger.info(SOURCE, "Right trigger (SaberActivate): BOUND - first input received")
+
 			var was_pressed := right_trigger_value >= TRIGGER_THRESHOLD
 			right_trigger_value = value
 			var is_pressed := value >= TRIGGER_THRESHOLD
 			if is_pressed and not was_pressed:
+				DebugLogger.debug(SOURCE, "Right trigger PRESSED (saber activate)")
 				trigger_pressed.emit(Hand.RIGHT)
 			elif not is_pressed and was_pressed:
+				DebugLogger.debug(SOURCE, "Right trigger RELEASED")
 				trigger_released.emit(Hand.RIGHT)
 		"grip":
+			# First-time binding detection
+			if not _right_grip_first_bound and value > 0.01:
+				_right_grip_first_bound = true
+				DebugLogger.info(SOURCE, "Right grip (SaberGrip): BOUND - first input received")
+
 			var was_pressed := right_grip_value >= GRIP_THRESHOLD
 			right_grip_value = value
 			var is_pressed := value >= GRIP_THRESHOLD
 			if is_pressed and not was_pressed:
+				DebugLogger.debug(SOURCE, "Right grip PRESSED")
 				grip_pressed.emit(Hand.RIGHT)
 			elif not is_pressed and was_pressed:
+				DebugLogger.debug(SOURCE, "Right grip RELEASED")
 				grip_released.emit(Hand.RIGHT)
 
 

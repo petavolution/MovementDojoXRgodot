@@ -64,11 +64,13 @@ func setup_references(camera: XRCamera3D, left_ctrl: XRController3D) -> void:
 
 
 func _create_hud_ui() -> void:
-	# Create SubViewport for 2D UI in 3D
+	# Create SubViewport for 2D UI in 3D world space
 	var viewport := SubViewport.new()
 	viewport.size = Vector2i(400, 300)
 	viewport.transparent_bg = true
-	viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	viewport.render_target_update_mode = SubViewport.UPDATE_WHEN_VISIBLE  # More efficient than ALWAYS
+	viewport.render_target_clear_mode = SubViewport.CLEAR_MODE_ALWAYS  # Ensure clean transparency
+	viewport.gui_disable_input = true  # No input needed for this HUD
 	add_child(viewport)
 
 	# Create panel
@@ -163,11 +165,15 @@ func _create_hud_ui() -> void:
 	pose_label.add_theme_color_override("font_color", Color(1.0, 0.8, 0.2))
 	vbox.add_child(pose_label)
 
-	# Create Sprite3D to display the viewport
+	# Create Sprite3D to display the viewport in 3D world
 	var sprite := Sprite3D.new()
 	sprite.texture = viewport.get_texture()
 	sprite.pixel_size = 0.001
 	sprite.billboard = BaseMaterial3D.BILLBOARD_DISABLED
+	sprite.alpha_cut = SpriteBase3D.ALPHA_CUT_DISABLED  # Use alpha blending
+	sprite.shaded = false  # Unshaded for UI clarity
+	sprite.double_sided = false  # Only visible from front
+	sprite.render_priority = 10  # Render on top of other transparent objects
 	add_child(sprite)
 
 

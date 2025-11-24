@@ -16,15 +16,21 @@ config/icon="res://icon.svg"
 
 [autoload]
 
-MovementTracker="*res://scripts/core/movement_tracker.gd"
-SessionManager="*res://scripts/core/session_manager.gd"
-MovementAnalytics="*res://scripts/analytics/movement_analytics.gd"
+; Essential systems only (loaded in dependency order)
+; DebugLogger FIRST - captures all errors/debug output to file
+DebugLogger="*res://scripts/core/debug_logger.gd"
+; GameEvents - signal bus with no dependencies
 GameEvents="*res://scripts/core/game_events.gd"
-AudioManager="*res://scripts/core/audio_manager.gd"
-ScoreManager="*res://scripts/core/score_manager.gd"
+; XRInputManager - controller input handling
 XRInputManager="*res://scripts/core/xr_input_manager.gd"
-AdaptiveDifficulty="*res://scripts/core/adaptive_difficulty.gd"
-ReplaySystem="*res://scripts/core/replay_system.gd"
+; MovementTracker - XR data capture (depends on GameEvents)
+MovementTracker="*res://scripts/core/movement_tracker.gd"
+; SessionManager - persistence (depends on MovementTracker, GameEvents)
+SessionManager="*res://scripts/core/session_manager.gd"
+
+; Secondary systems are lazy-loaded via SystemsManager:
+; - MovementAnalytics, AudioManager, ScoreManager
+; - AdaptiveDifficulty, ReplaySystem, AchievementSystem
 
 [display]
 

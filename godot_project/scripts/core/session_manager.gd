@@ -1,7 +1,9 @@
 ## SessionManager - Data persistence and session lifecycle
 ## Autoloaded as "SessionManager"
 extends Node
+class_name SessionManagerClass
 
+const SOURCE := "SessionManager"
 const SAVE_DIR := "user://movement_dojo/"
 const SESSIONS_DIR := "user://movement_dojo/sessions/"
 const ANALYTICS_DIR := "user://movement_dojo/analytics/"
@@ -36,9 +38,11 @@ var settings := {
 
 
 func _ready() -> void:
+	DebugLogger.info(SOURCE, "Initializing SessionManager")
 	_ensure_directories()
 	_load_lifetime_stats()
 	_load_settings()
+	DebugLogger.info(SOURCE, "SessionManager ready - %d previous sessions recorded" % lifetime_stats.get("total_sessions", 0))
 
 
 func start_session() -> String:
@@ -52,7 +56,7 @@ func start_session() -> String:
 	MovementTracker.start_tracking()
 
 	GameEvents.session_started.emit(current_session_id)
-	print("[SessionManager] Session started: ", current_session_id)
+	DebugLogger.info(SOURCE, "Session started: %s" % current_session_id)
 
 	return current_session_id
 
@@ -69,7 +73,7 @@ func end_session() -> Dictionary:
 
 	session_active = false
 	GameEvents.session_ended.emit(current_session_id, summary)
-	print("[SessionManager] Session ended: ", current_session_id)
+	DebugLogger.info(SOURCE, "Session ended: %s" % current_session_id)
 
 	current_session_id = ""
 	return summary
@@ -174,7 +178,12 @@ func _generate_short_uuid() -> String:
 
 
 func _compile_session_summary() -> Dictionary:
-	var stats := MovementAnalytics.get_current_stats()
+	# Get analytics stats if available (lazy-loaded)
+	var stats := {}
+	var analytics := SystemsManager.analytics() if SystemsManager.instance else null
+	if analytics and analytics.has_method("get_current_stats"):
+		stats = analytics.get_current_stats()
+
 	var space_map := MovementTracker.get_space_map()
 	var frames := MovementTracker.get_all_frames()
 
@@ -204,7 +213,7 @@ func _save_session(summary: Dictionary) -> void:
 	var file := FileAccess.open(file_path, FileAccess.WRITE)
 
 	if file == null:
-		push_error("[SessionManager] Failed to save session: ", FileAccess.get_open_error())
+		DebugLogger.error(SOURCE, "Failed to save session: %d" % FileAccess.get_open_error())
 		return
 
 	# Include frame data for detailed analysis (compressed)
@@ -223,7 +232,7 @@ func _save_session(summary: Dictionary) -> void:
 	file.store_string(JSON.stringify(full_data, "\t"))
 	file.close()
 
-	print("[SessionManager] Session saved: ", file_path)
+	DebugLogger.info(SOURCE, "Session saved: %s" % file_path)
 
 
 func _load_session_file(file_path: String) -> Dictionary:
@@ -236,7 +245,7 @@ func _load_session_file(file_path: String) -> Dictionary:
 	file.close()
 
 	if error != OK:
-		push_error("[SessionManager] Failed to parse session file: ", file_path)
+		DebugLogger.error(SOURCE, "Failed to parse session file: %s" % file_path)
 		return {}
 
 	return json.data
@@ -328,7 +337,7 @@ func _save_lifetime_stats() -> void:
 	var file := FileAccess.open(file_path, FileAccess.WRITE)
 
 	if file == null:
-		push_error("[SessionManager] Failed to save lifetime stats")
+		DebugLogger.error(SOURCE, "Failed to save lifetime stats")
 		return
 
 	file.store_string(JSON.stringify(lifetime_stats, "\t"))
@@ -356,7 +365,7 @@ func _save_settings() -> void:
 	var file := FileAccess.open(SETTINGS_FILE, FileAccess.WRITE)
 
 	if file == null:
-		push_error("[SessionManager] Failed to save settings")
+		DebugLogger.error(SOURCE, "Failed to save settings")
 		return
 
 	file.store_string(JSON.stringify(settings, "\t"))

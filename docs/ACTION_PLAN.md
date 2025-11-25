@@ -8,8 +8,8 @@
 | Lightsaber/Combat | 95% | Minor polish |
 | Proprioception Training | 95% | Externalize definitions |
 | glTF Pipeline | 70% | Document workflow |
+| **Data-Driven Content** | **60%** | **Phase 1 complete, add YAML/JSON** |
 | **USD Integration** | **0%** | **High priority** |
-| **Data-Driven Content** | **20%** | **High priority** |
 | **CI/CD & Tooling** | **10%** | **High priority** |
 
 ---
@@ -17,23 +17,38 @@
 ## Immediate Actions (Next Sprint)
 
 ### 1. Training Definition System
-**Estimated effort: 3-4 days**
+**Status: Phase 1 Complete ✓**
 
+**Completed (Phase 1 - .tres Resources):**
+- ✅ Created `resources/training_sequences/` directory
+- ✅ Updated `SequenceLibrary` to load from .tres files
+- ✅ Added validation on load with fallback to factory methods
+- ✅ Created `export_training_sequences.gd` tool
+- ✅ Comprehensive README.md documentation
+
+**Next Steps (Phase 2 - YAML/JSON):**
 Create `training_definitions/` directory structure:
 ```
 training_definitions/
 ├── schema.json          # JSON Schema for validation
-├── posture/
-│   └── ready_stance.yaml
-├── paths/
-│   └── basic_arc.yaml
-└── katas/
-    └── beginner_form_1.yaml
+├── sequences/
+│   ├── level1_fundamentals.yaml
+│   └── level2_intermediate.yaml
+└── README.md
 ```
 
-Implement loader:
+Implement YAML converter:
 ```
 godot_project/scripts/core/training_definition_loader.gd
+```
+
+**Current Usage:**
+```bash
+# Export sequences to .tres files
+godot --headless --script res://tools/export_training_sequences.gd
+
+# Sequences auto-load from:
+# res://resources/training_sequences/{sequence_id}.tres
 ```
 
 ### 2. CI/CD Pipeline Setup
@@ -107,23 +122,28 @@ Create adaptive quality system:
 
 ## Key Files to Create
 
-| File | Purpose | Priority |
-|------|---------|----------|
-| `training_definitions/schema.json` | Training def validation | HIGH |
-| `godot_project/scripts/core/training_definition_loader.gd` | Load external defs | HIGH |
-| `.github/workflows/ci.yml` | Automated testing | HIGH |
-| `docs/ASSET_PIPELINE.md` | Artist documentation | MEDIUM |
-| `tools/movement_dojo_cli.py` | Developer tools | MEDIUM |
-| `godot_project/scripts/core/mod_loader.gd` | Community content | MEDIUM |
-| `godot_project/scripts/core/usd_metadata_loader.gd` | USD integration | MEDIUM |
-| `godot_project/scripts/core/performance_manager.gd` | Auto quality | MEDIUM |
+| File | Purpose | Priority | Status |
+|------|---------|----------|--------|
+| `training_definitions/schema.json` | Training def validation | HIGH | PENDING |
+| `godot_project/scripts/core/training_definition_loader.gd` | Load external defs | HIGH | PENDING |
+| `godot_project/resources/training_sequences/*.tres` | Sequence resources | HIGH | ✅ DONE |
+| `godot_project/tools/export_training_sequences.gd` | Export tool | HIGH | ✅ DONE |
+| `.github/workflows/ci.yml` | Automated testing | HIGH | PENDING |
+| `docs/ASSET_PIPELINE.md` | Artist documentation | MEDIUM | PENDING |
+| `tools/movement_dojo_cli.py` | Developer tools | MEDIUM | PENDING |
+| `godot_project/scripts/core/mod_loader.gd` | Community content | MEDIUM | PENDING |
+| `godot_project/scripts/core/usd_metadata_loader.gd` | USD integration | MEDIUM | PENDING |
+| `godot_project/scripts/core/performance_manager.gd` | Auto quality | MEDIUM | PENDING |
 
 ---
 
 ## Success Criteria
 
 **Phase 1 Complete:**
-- [ ] 3+ training exercises defined in YAML
+- [x] Training sequences externalized to .tres files ✓
+- [x] Resource loading system with validation ✓
+- [x] Export tool and documentation ✓
+- [ ] 3+ training exercises defined (1/3 complete: level1_fundamentals)
 - [ ] CI pipeline runs on every PR
 - [ ] Asset pipeline documented
 

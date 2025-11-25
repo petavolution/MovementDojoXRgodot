@@ -3,8 +3,20 @@
 ##
 ## Design: Central repository for all built-in sequences
 ## Sequences can also be loaded from .tres resource files
+##
+## Migration Strategy:
+## 1. First tries to load sequence from res://resources/training_sequences/
+## 2. If not found, creates programmatically using factory methods
+## 3. Use export_all_sequences() to migrate hardcoded sequences to files
 class_name SequenceLibrary
 extends RefCounted
+
+# =============================================================================
+# CONSTANTS
+# =============================================================================
+
+const SEQUENCE_RESOURCE_DIR := "res://resources/training_sequences/"
+const SOURCE := "SequenceLibrary"
 
 # =============================================================================
 # SEQUENCE CATALOG
@@ -19,8 +31,37 @@ static func get_available_sequences() -> Array[String]:
 	]
 
 
-## Get sequence by ID
+## Get resource file path for a sequence ID
+static func get_sequence_path(sequence_id: String) -> String:
+	return SEQUENCE_RESOURCE_DIR + sequence_id + ".tres"
+
+
+## Check if sequence has been exported to .tres file
+static func has_sequence_file(sequence_id: String) -> bool:
+	return ResourceLoader.exists(get_sequence_path(sequence_id))
+
+
+## Get sequence by ID (loads from file or creates programmatically)
 static func get_sequence(sequence_id: String) -> TrainingSequence:
+	# Try loading from resource file first
+	var res_path := get_sequence_path(sequence_id)
+	if ResourceLoader.exists(res_path):
+		DebugLogger.info(SOURCE, "Loading sequence '%s' from resource file" % sequence_id)
+		var sequence: TrainingSequence = load(res_path)
+		if sequence != null:
+			# Validate loaded sequence
+			var errors := sequence.validate()
+			if errors.is_empty():
+				DebugLogger.debug(SOURCE, "Sequence '%s' loaded and validated successfully" % sequence_id)
+				return sequence
+			else:
+				DebugLogger.error(SOURCE, "Sequence '%s' validation failed:" % sequence_id)
+				for error in errors:
+					DebugLogger.error(SOURCE, "  - %s" % error)
+				push_error("Sequence validation failed, falling back to factory method")
+
+	# Fall back to factory methods
+	DebugLogger.info(SOURCE, "Creating sequence '%s' programmatically (no resource file)" % sequence_id)
 	match sequence_id:
 		"level1_fundamentals":
 			return create_level1_fundamentals()
@@ -31,6 +72,82 @@ static func get_sequence(sequence_id: String) -> TrainingSequence:
 		_:
 			push_error("Unknown sequence ID: %s" % sequence_id)
 			return null
+
+
+## Export a sequence to a .tres resource file
+static func export_sequence(sequence: TrainingSequence, overwrite: bool = false) -> bool:
+	if sequence == null:
+		push_error("Cannot export null sequence")
+		return false
+
+	# Validate before export
+	var errors := sequence.validate()
+	if not errors.is_empty():
+		push_error("Cannot export invalid sequence '%s':" % sequence.sequence_id)
+		for error in errors:
+			push_error("  - %s" % error)
+		return false
+
+	var res_path := get_sequence_path(sequence.sequence_id)
+
+	# Check if file already exists
+	if ResourceLoader.exists(res_path) and not overwrite:
+		DebugLogger.warn(SOURCE, "Sequence file already exists: %s (use overwrite=true to replace)" % res_path)
+		return false
+
+	# Save resource
+	var err := ResourceSaver.save(sequence, res_path)
+	if err != OK:
+		push_error("Failed to save sequence '%s' to %s (error %d)" % [sequence.sequence_id, res_path, err])
+		return false
+
+	DebugLogger.info(SOURCE, "Exported sequence '%s' to %s" % [sequence.sequence_id, res_path])
+	return true
+
+
+## Export all built-in sequences to .tres files
+## Call this once to migrate from hardcoded to resource-based sequences
+static func export_all_sequences(overwrite: bool = false) -> Dictionary:
+	var results := {
+		"success": [],
+		"failed": [],
+		"skipped": []
+	}
+
+	DebugLogger.info(SOURCE, "Exporting all built-in sequences to resource files...")
+
+	for sequence_id in get_available_sequences():
+		# Create sequence programmatically (bypassing file loading)
+		var sequence: TrainingSequence = null
+		match sequence_id:
+			"level1_fundamentals":
+				sequence = create_level1_fundamentals()
+			"level2_intermediate":
+				sequence = create_level2_intermediate()
+			"endless_survival":
+				sequence = create_endless_survival()
+
+		if sequence == null:
+			results.failed.append(sequence_id)
+			continue
+
+		# Check if already exists
+		if has_sequence_file(sequence_id) and not overwrite:
+			DebugLogger.debug(SOURCE, "  Skipping '%s' (already exists)" % sequence_id)
+			results.skipped.append(sequence_id)
+			continue
+
+		# Export
+		if export_sequence(sequence, overwrite):
+			results.success.append(sequence_id)
+		else:
+			results.failed.append(sequence_id)
+
+	DebugLogger.info(SOURCE, "Export complete: %d succeeded, %d failed, %d skipped" % [
+		results.success.size(), results.failed.size(), results.skipped.size()
+	])
+
+	return results
 
 
 # =============================================================================

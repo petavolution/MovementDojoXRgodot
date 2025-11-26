@@ -1,21 +1,12 @@
 ## DojoSmokeTest - Minimal VR scene to verify XR setup works
 ## Run with: godot --vr-smoke-test
+## Extends BaseVRScene for consistent XR initialization
 ## Tests: XR rendering, controller tracking, basic input bindings
 ## Spawns: floor, walls, debug saber (right), debug blaster (left), dummy drone
-extends Node3D
+extends BaseVRScene
 class_name DojoSmokeTest
 
 const SOURCE := "SmokeTest"
-
-# XR Nodes
-var xr_origin: XROrigin3D
-var xr_camera: XRCamera3D
-var left_controller: XRController3D
-var right_controller: XRController3D
-
-# XR State
-var xr_interface: XRInterface
-var xr_initialized := false
 
 # Debug meshes (created procedurally)
 var debug_saber: MeshInstance3D
@@ -35,14 +26,16 @@ func _ready() -> void:
 	DebugLogger.info(SOURCE, "Testing: XR rendering, controller tracking, input bindings")
 	DebugLogger.info(SOURCE, "")
 
-	# Setup XR
-	_setup_xr()
+	# Disable desktop fallback for smoke test (we want to fail if VR doesn't work)
+	desktop_mode_enabled = false
 
-	if not xr_initialized:
-		DebugLogger.error(SOURCE, "XR initialization failed - smoke test cannot continue")
-		# Use centralized shutdown for clean exit
-		EngineShutdown.startup_failure("SmokeTest", "XR initialization failed")
-		return
+	# Call base class to handle XR initialization
+	super._ready()
+
+
+## Called by BaseVRScene after successful XR initialization
+func _on_xr_initialized() -> void:
+	DebugLogger.info(SOURCE, "XR initialized, building smoke test scene...")
 
 	# Build scene
 	_build_dojo_environment()
@@ -58,52 +51,17 @@ func _ready() -> void:
 	DebugLogger.info(SOURCE, "Press menu button or ESC to exit.")
 
 
-func _setup_xr() -> void:
-	DebugLogger.info(SOURCE, "Setting up XR...")
+## Called by BaseVRScene when XR initialization fails
+func _on_xr_failed(reason: String) -> void:
+	DebugLogger.error(SOURCE, "XR initialization failed: %s" % reason)
+	EngineShutdown.startup_failure("SmokeTest", reason)
 
-	# Create XR scene structure
-	xr_origin = XROrigin3D.new()
-	xr_origin.name = "XROrigin3D"
-	add_child(xr_origin)
 
-	xr_camera = XRCamera3D.new()
-	xr_camera.name = "XRCamera3D"
-	xr_origin.add_child(xr_camera)
-
-	left_controller = XRController3D.new()
-	left_controller.name = "LeftController"
-	left_controller.tracker = "left_hand"
-	xr_origin.add_child(left_controller)
-
-	right_controller = XRController3D.new()
-	right_controller.name = "RightController"
-	right_controller.tracker = "right_hand"
-	xr_origin.add_child(right_controller)
-
-	# Initialize OpenXR
-	xr_interface = XRServer.find_interface("OpenXR")
-	if xr_interface == null:
-		DebugLogger.error(SOURCE, "OpenXR interface not found")
-		return
-
-	get_viewport().use_xr = true
-
-	if not xr_interface.is_initialized():
-		if not xr_interface.initialize():
-			DebugLogger.error(SOURCE, "Failed to initialize OpenXR")
-			return
-
-	xr_initialized = true
-
-	# Sync physics to display
-	var refresh_rate := xr_interface.get_display_refresh_rate()
-	if refresh_rate > 0:
-		Engine.physics_ticks_per_second = int(refresh_rate)
-	else:
-		Engine.physics_ticks_per_second = 90
-
-	DebugLogger.info(SOURCE, "XR initialized at %.0f Hz" % Engine.physics_ticks_per_second)
-
+# =============================================================================
+# XR SETUP COMPLETE - Now handled by BaseVRScene
+# Removed ~80 lines of duplicated XR initialization code
+# See godot_project/scripts/core/base_vr_scene.gd for implementation
+# =============================================================================
 
 func _build_dojo_environment() -> void:
 	DebugLogger.info(SOURCE, "Building dojo environment...")

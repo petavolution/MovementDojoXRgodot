@@ -1,26 +1,18 @@
 ## VR Diagnostics Runner - Comprehensive XR readiness checker for Quest 3 + Virtual Desktop + SteamVR
 ## Run with: godot --vr-diagnostics
+## Extends BaseVRScene for consistent XR initialization
 ## Checks OpenXR startup, HMD tracking, controller bindings, and frame loop stability
-extends Node3D
+extends BaseVRScene
 class_name VRDiagnostics
 
 const SOURCE := "VRDiagnostics"
-const TOTAL_STARTUP_STEPS := 5
 
 # Diagnostic configuration
 const DEFAULT_TEST_DURATION_MS := 5000  # 5 seconds of frame loop testing
 const MIN_VALID_POSE_RATIO := 0.8  # 80% of frames must have valid poses
 const MIN_FRAMES_REQUIRED := 100  # Minimum frames to run during test
 
-# XR Nodes
-var xr_origin: XROrigin3D
-var xr_camera: XRCamera3D
-var left_controller: XRController3D
-var right_controller: XRController3D
-
-# XR State
-var xr_interface: XRInterface
-var init_state := XRHelpers.XRInitState.NOT_STARTED
+# Diagnostic results (startup_results inherited from BaseVRScene)
 var diagnostic_results: XRHelpers.DiagnosticResults
 
 # Frame loop tracking
@@ -34,8 +26,6 @@ signal diagnostics_complete(results: XRHelpers.DiagnosticResults)
 
 
 func _ready() -> void:
-	diagnostic_results = XRHelpers.DiagnosticResults.new()
-
 	DebugLogger.info(SOURCE, "=== VR DIAGNOSTICS MODE ===")
 	DebugLogger.info(SOURCE, "Quest 3 + Virtual Desktop + SteamVR Readiness Check")
 	DebugLogger.info(SOURCE, "")
@@ -44,224 +34,47 @@ func _ready() -> void:
 	test_duration_ms = XRHelpers.get_diagnostic_timeout_ms()
 	DebugLogger.info(SOURCE, "Frame loop test duration: %d ms" % test_duration_ms)
 
-	# Setup XR scene structure
-	_setup_xr_scene()
+	# Disable desktop fallback for diagnostics (we want to fail if VR doesn't work)
+	desktop_mode_enabled = false
 
-	# Run startup sequence with detailed logging
-	var startup_success := _run_startup_sequence()
-
-	if startup_success:
-		# Start frame loop test
-		DebugLogger.info(SOURCE, "")
-		DebugLogger.info(SOURCE, "Starting frame loop test...")
-		is_running_frame_test = true
-		frame_loop_start_time = Time.get_ticks_msec()
-	else:
-		# Immediate failure
-		_finalize_diagnostics()
+	# Call base class to handle XR initialization
+	# This will call _on_xr_initialized() if successful or _on_xr_failed() if not
+	super._ready()
 
 
-func _setup_xr_scene() -> void:
-	# Create minimal XR scene for diagnostics
-	xr_origin = XROrigin3D.new()
-	xr_origin.name = "XROrigin3D"
-	add_child(xr_origin)
+## Called by BaseVRScene after successful XR initialization
+func _on_xr_initialized() -> void:
+	DebugLogger.info(SOURCE, "XR initialized successfully, starting frame loop test...")
 
-	xr_camera = XRCamera3D.new()
-	xr_camera.name = "XRCamera3D"
-	xr_origin.add_child(xr_camera)
+	# Copy startup results from base class for diagnostic report
+	diagnostic_results = startup_results
 
-	left_controller = XRController3D.new()
-	left_controller.name = "LeftController"
-	left_controller.tracker = "left_hand"
-	xr_origin.add_child(left_controller)
-
-	right_controller = XRController3D.new()
-	right_controller.name = "RightController"
-	right_controller.tracker = "right_hand"
-	xr_origin.add_child(right_controller)
-
-	DebugLogger.debug(SOURCE, "XR scene structure created")
-
-
-func _run_startup_sequence() -> bool:
+	# Start frame loop test
 	DebugLogger.info(SOURCE, "")
-	DebugLogger.info(SOURCE, "=== OPENXR STARTUP SEQUENCE ===")
-	init_state = XRHelpers.XRInitState.FINDING_INTERFACE
-
-	# Step 1: Find OpenXR interface
-	XRHelpers.log_startup_step(1, TOTAL_STARTUP_STEPS, "Finding OpenXR interface")
-	xr_interface = XRServer.find_interface("OpenXR")
-
-	var check := XRHelpers.check_interface_exists(xr_interface, "xrFindInterface")
-	if not check.success:
-		diagnostic_results.openxr_available = false
-		diagnostic_results.failure_reason = "OpenXR interface not found - SteamVR may not be the active runtime"
-		init_state = XRHelpers.XRInitState.FAILED
-		return false
-
-	diagnostic_results.openxr_available = true
-	XRHelpers.log_startup_result(1, true, "OpenXR interface found")
-
-	# Step 2: Query runtime properties
-	XRHelpers.log_startup_step(2, TOTAL_STARTUP_STEPS, "Querying runtime properties")
-	init_state = XRHelpers.XRInitState.CHECKING_RUNTIME
-
-	var runtime_info := XRHelpers.detect_runtime()
-	diagnostic_results.runtime_name = runtime_info.name
-	diagnostic_results.runtime_version = xr_interface.get_name()
-
-	XRHelpers.log_runtime_properties(diagnostic_results.runtime_name, diagnostic_results.runtime_version)
-	XRHelpers.log_startup_result(2, true)
-
-	# Detect graphics API
-	diagnostic_results.graphics_api = XRHelpers.get_graphics_api_name()
-	DebugLogger.info(SOURCE, "Graphics API: %s" % diagnostic_results.graphics_api)
-
-	# Step 3: Initialize interface (creates instance, gets system/HMD)
-	XRHelpers.log_startup_step(3, TOTAL_STARTUP_STEPS, "Initializing OpenXR (instance + system)")
-	init_state = XRHelpers.XRInitState.INITIALIZING
-
-	# CRITICAL: Set viewport to XR mode BEFORE initialize
-	get_viewport().use_xr = true
-
-	var init_success := xr_interface.is_initialized()
-	if not init_success:
-		init_success = xr_interface.initialize()
-
-	check = XRHelpers.xr_check(init_success, "xrInitialize")
-	if not check.success:
-		diagnostic_results.failure_reason = "OpenXR initialization failed - HMD may not be connected"
-		init_state = XRHelpers.XRInitState.FAILED
-		return false
-
-	diagnostic_results.hmd_detected = true
-	XRHelpers.log_startup_result(3, true, "HMD detected and bound")
-
-	# Get system properties from interface
-	_query_system_properties()
-
-	# Step 4: Configure display
-	XRHelpers.log_startup_step(4, TOTAL_STARTUP_STEPS, "Configuring display and view")
-	init_state = XRHelpers.XRInitState.CONFIGURING_DISPLAY
-
-	_configure_display()
-	XRHelpers.log_startup_result(4, true)
-
-	# Step 5: Configure actions and start session
-	XRHelpers.log_startup_step(5, TOTAL_STARTUP_STEPS, "Binding actions and starting session")
-	init_state = XRHelpers.XRInitState.CONFIGURING_ACTIONS
-
-	# Check action map exists
-	var action_map_path := ProjectSettings.get_setting("xr/openxr/default_action_map", "")
-	if action_map_path and ResourceLoader.exists(action_map_path):
-		DebugLogger.info(SOURCE, "Action map: %s" % action_map_path)
-	else:
-		DebugLogger.warn(SOURCE, "Action map not found or not configured")
-
-	init_state = XRHelpers.XRInitState.READY
-	XRHelpers.log_startup_result(5, true, "Session ready")
-
-	# Log startup summary
-	DebugLogger.info(SOURCE, "")
-	XRHelpers.log_startup_summary(diagnostic_results)
-
-	return true
+	DebugLogger.info(SOURCE, "Starting frame loop test...")
+	is_running_frame_test = true
+	frame_loop_start_time = Time.get_ticks_msec()
 
 
-func _query_system_properties() -> void:
-	# Query HMD/system info via available XR interface methods
-	# Note: Godot's XRInterface abstracts many OpenXR details
+## Called by BaseVRScene when XR initialization fails
+func _on_xr_failed(reason: String) -> void:
+	DebugLogger.error(SOURCE, "XR initialization failed: %s" % reason)
 
-	# Get system name (often returns runtime name or HMD model)
-	diagnostic_results.hmd_system_name = xr_interface.get_name()
+	# Copy startup results from base class
+	diagnostic_results = startup_results
+	diagnostic_results.overall_pass = false
+	if diagnostic_results.failure_reason.is_empty():
+		diagnostic_results.failure_reason = reason
 
-	# Determine form factor
-	var form_factor_setting := ProjectSettings.get_setting("xr/openxr/form_factor", 0)
-	match form_factor_setting:
-		0:
-			diagnostic_results.form_factor = "Head-Mounted Display"
-		1:
-			diagnostic_results.form_factor = "Handheld"
-		_:
-			diagnostic_results.form_factor = "Unknown (%d)" % form_factor_setting
-
-	# View configuration
-	var view_config_setting := ProjectSettings.get_setting("xr/openxr/view_configuration", 1)
-	match view_config_setting:
-		1:
-			diagnostic_results.view_configuration = "Stereo"
-		2:
-			diagnostic_results.view_configuration = "Mono"
-		_:
-			diagnostic_results.view_configuration = "Config %d" % view_config_setting
-
-	XRHelpers.log_system_properties(
-		diagnostic_results.hmd_system_name,
-		diagnostic_results.hmd_vendor_id,
-		diagnostic_results.form_factor
-	)
+	# Finalize with failure
+	_finalize_diagnostics()
 
 
-func _configure_display() -> void:
-	# Get refresh rate
-	diagnostic_results.refresh_rate = xr_interface.get_display_refresh_rate()
-	if diagnostic_results.refresh_rate <= 0:
-		diagnostic_results.refresh_rate = 90.0  # Default VR rate
-		DebugLogger.debug(SOURCE, "Using default refresh rate: 90 Hz")
-
-	# Sync physics tick rate
-	Engine.physics_ticks_per_second = int(diagnostic_results.refresh_rate)
-	DebugLogger.info(SOURCE, "Physics tick rate: %d Hz" % Engine.physics_ticks_per_second)
-
-	# Get render target size (resolution per eye)
-	var render_size := xr_interface.get_render_target_size()
-	diagnostic_results.resolution_per_eye = Vector2i(int(render_size.x), int(render_size.y))
-
-	# Foveation level
-	diagnostic_results.foveation_level = ProjectSettings.get_setting("xr/openxr/foveation_level", -1)
-
-	XRHelpers.log_view_configuration(
-		diagnostic_results.view_configuration,
-		2,  # Stereo = 2 views
-		diagnostic_results.resolution_per_eye
-	)
-
-	DebugLogger.info(SOURCE, "Refresh rate: %.0f Hz" % diagnostic_results.refresh_rate)
-
-	# Check play area
-	_check_play_area()
-
-
-func _check_play_area() -> void:
-	# Get play area bounds if available
-	if xr_interface.has_method("get_play_area"):
-		var play_area: PackedVector3Array = xr_interface.get_play_area()
-		if play_area.size() >= 3:
-			# Calculate bounds from polygon
-			var min_x := INF
-			var max_x := -INF
-			var min_z := INF
-			var max_z := -INF
-			for point in play_area:
-				min_x = minf(min_x, point.x)
-				max_x = maxf(max_x, point.x)
-				min_z = minf(min_z, point.z)
-				max_z = maxf(max_z, point.z)
-
-			diagnostic_results.play_area_size = Vector2(max_x - min_x, max_z - min_z)
-			diagnostic_results.play_area_configured = true
-			DebugLogger.info(SOURCE, "Play area: %.1fm x %.1fm" % [
-				diagnostic_results.play_area_size.x,
-				diagnostic_results.play_area_size.y
-			])
-		else:
-			diagnostic_results.play_area_configured = false
-			DebugLogger.warn(SOURCE, "Play area not configured (boundary not set up)")
-	else:
-		diagnostic_results.play_area_configured = false
-		DebugLogger.debug(SOURCE, "Play area query not supported")
-
+# =============================================================================
+# XR SETUP COMPLETE - Now handled by BaseVRScene
+# Removed ~200 lines of duplicated XR initialization code
+# See godot_project/scripts/core/base_vr_scene.gd for implementation
+# =============================================================================
 
 func _process(_delta: float) -> void:
 	if not is_running_frame_test:

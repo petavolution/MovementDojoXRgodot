@@ -1,10 +1,9 @@
 ## Main VR Scene - Entry point and scene management
-## Initializes XR, sets up tracking, and manages game state
-## Enhanced with robust OpenXR error handling for Quest 3 + Virtual Desktop + SteamVR
-extends Node3D
+## Extends BaseVRScene for consistent XR initialization across all scenes
+## Routes to specialized scenes based on command-line flags
+extends BaseVRScene
 
 const SOURCE := "MainVR"
-const XR_STARTUP_STEPS := 5
 
 enum GameState {
 	INITIALIZING,
@@ -13,12 +12,6 @@ enum GameState {
 	WELLNESS_ROUTINE,
 	PAUSED
 }
-
-# XR nodes (required)
-@onready var xr_origin: XROrigin3D = $XROrigin3D
-@onready var xr_camera: XRCamera3D = $XROrigin3D/XRCamera3D
-@onready var left_controller: XRController3D = $XROrigin3D/LeftController
-@onready var right_controller: XRController3D = $XROrigin3D/RightController
 
 # Game components (optional - null-safe access)
 var left_saber: Lightsaber
@@ -32,22 +25,14 @@ var target_spawner: Node3D
 
 # State
 var current_state := GameState.INITIALIZING
-var xr_interface: XRInterface
-var xr_initialized := false
-var desktop_mode := false
-var xr_init_state := XRHelpers.XRInitState.NOT_STARTED
-var xr_startup_results: XRHelpers.DiagnosticResults
-
-# Desktop mode settings
-var mouse_sensitivity := 0.003
-var move_speed := 3.0
 
 # Systems manager (lazy-loads secondary systems)
 var systems: SystemsManager
 
 
 func _ready() -> void:
-	# Check for special modes (diagnostics, smoke test, level1)
+	# Check for special modes (diagnostics, smoke test, level1) BEFORE XR init
+	# These bypass the main VR scene entirely
 	if XRHelpers.has_diagnostics_flag():
 		DebugLogger.info(SOURCE, "VR Diagnostics mode detected - switching to diagnostics scene")
 		get_tree().change_scene_to_file("res://scenes/vr_diagnostics.tscn")
@@ -70,63 +55,40 @@ func _ready() -> void:
 		_start_training_sequence_scene(seq_id)
 		return
 
-	DebugLogger.info(SOURCE, "=== Starting initialization ===")
-	xr_startup_results = XRHelpers.DiagnosticResults.new()
+	# No special mode - initialize main VR scene
+	DebugLogger.info(SOURCE, "=== Starting Main VR Scene ===")
 
-	# 1. CRITICAL: Validate required XR nodes exist BEFORE anything else
-	DebugLogger.debug(SOURCE, "Step 1: Validating scene structure")
-	if not _validate_scene_structure():
-		DebugLogger.error(SOURCE, "Scene structure validation failed - aborting")
-		EngineShutdown.startup_failure("MainVR", "Required XR nodes missing from scene")
-		return
+	# Call base class to handle XR initialization
+	# This will call _on_xr_initialized() when ready
+	super._ready()
 
-	# 2. Initialize XR EARLY with enhanced error handling
-	DebugLogger.debug(SOURCE, "Step 2: Initializing OpenXR")
-	_initialize_xr_enhanced()
 
-	# 3. Setup systems manager (for lazy-loading)
-	DebugLogger.debug(SOURCE, "Step 3: Creating SystemsManager")
+## Called by BaseVRScene after successful XR initialization
+func _on_xr_initialized() -> void:
+	DebugLogger.info(SOURCE, "XR initialized, setting up game scene")
+
+	# 1. Setup systems manager (for lazy-loading)
+	DebugLogger.debug(SOURCE, "Creating SystemsManager")
 	systems = SystemsManager.new()
 	add_child(systems)
 
-	# 4. Safely get optional node references
-	DebugLogger.debug(SOURCE, "Step 4: Setting up optional nodes")
+	# 2. Safely get optional node references
+	DebugLogger.debug(SOURCE, "Setting up optional nodes")
 	_setup_optional_nodes()
 
-	# 5. Setup tracking (after XR is initialized)
-	DebugLogger.debug(SOURCE, "Step 5: Setting up controllers")
+	# 3. Setup tracking (after XR is initialized)
+	DebugLogger.debug(SOURCE, "Setting up controllers")
 	_setup_controllers()
 
-	# 6. Connect signals
-	DebugLogger.debug(SOURCE, "Step 6: Connecting signals")
+	# 4. Connect signals
+	DebugLogger.debug(SOURCE, "Connecting signals")
 	_connect_signals()
 
-	# 7. Start in menu state
-	DebugLogger.debug(SOURCE, "Step 7: Entering menu state")
+	# 5. Start in menu state
+	DebugLogger.debug(SOURCE, "Entering menu state")
 	_change_state(GameState.MENU)
 
 	DebugLogger.info(SOURCE, "=== Initialization complete (mode: %s) ===" % ("Desktop" if desktop_mode else "VR"))
-
-
-func _validate_scene_structure() -> bool:
-	# Validate critical XR nodes exist (required for rendering)
-	var valid := true
-
-	if xr_origin == null:
-		DebugLogger.error(SOURCE, "CRITICAL: XROrigin3D not found in scene!")
-		valid = false
-
-	if xr_camera == null:
-		DebugLogger.error(SOURCE, "CRITICAL: XRCamera3D not found in scene!")
-		valid = false
-
-	# Controllers are optional but warn if missing
-	if left_controller == null:
-		DebugLogger.warn(SOURCE, "Left controller not found")
-	if right_controller == null:
-		DebugLogger.warn(SOURCE, "Right controller not found")
-
-	return valid
 
 
 func _setup_optional_nodes() -> void:
@@ -142,6 +104,9 @@ func _setup_optional_nodes() -> void:
 
 
 func _process(delta: float) -> void:
+	# Call base class for desktop mode controls
+	super._process(delta)
+
 	if not xr_initialized:
 		return
 
@@ -152,212 +117,12 @@ func _process(delta: float) -> void:
 		elif current_state != GameState.MENU:
 			_pause_session()
 
-	# Desktop mode controls
-	if desktop_mode:
-		_handle_desktop_input(delta)
 
-
-func _input(event: InputEvent) -> void:
-	# Desktop mouse look
-	if desktop_mode and event is InputEventMouseMotion:
-		if Input.get_mouse_mode() == Input.MOUSE_MODE_CAPTURED:
-			var motion := event as InputEventMouseMotion
-			xr_camera.rotate_y(-motion.relative.x * mouse_sensitivity)
-			xr_camera.rotate_x(-motion.relative.y * mouse_sensitivity)
-			xr_camera.rotation.x = clamp(xr_camera.rotation.x, -PI/2, PI/2)
-
-	# Toggle mouse capture
-	if event.is_action_pressed("ui_cancel"):
-		if Input.get_mouse_mode() == Input.MOUSE_MODE_CAPTURED:
-			Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
-		else:
-			Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
-
-
-func _handle_desktop_input(delta: float) -> void:
-	# WASD movement
-	var input_dir := Vector3.ZERO
-	if Input.is_key_pressed(KEY_W):
-		input_dir.z -= 1
-	if Input.is_key_pressed(KEY_S):
-		input_dir.z += 1
-	if Input.is_key_pressed(KEY_A):
-		input_dir.x -= 1
-	if Input.is_key_pressed(KEY_D):
-		input_dir.x += 1
-
-	if input_dir != Vector3.ZERO:
-		input_dir = input_dir.normalized()
-		var direction := xr_camera.global_transform.basis * input_dir
-		direction.y = 0
-		direction = direction.normalized()
-		xr_origin.global_position += direction * move_speed * delta
-
-	# Simulate hand positions for testing (follows camera)
-	if left_controller:
-		left_controller.global_position = xr_camera.global_position + xr_camera.global_transform.basis * Vector3(-0.3, -0.2, -0.4)
-	if right_controller:
-		right_controller.global_position = xr_camera.global_position + xr_camera.global_transform.basis * Vector3(0.3, -0.2, -0.4)
-
-
-func _initialize_xr_enhanced() -> void:
-	DebugLogger.info(SOURCE, "=== OPENXR STARTUP SEQUENCE ===")
-	xr_init_state = XRHelpers.XRInitState.FINDING_INTERFACE
-
-	# Step 1: Find OpenXR interface
-	XRHelpers.log_startup_step(1, XR_STARTUP_STEPS, "Finding OpenXR interface")
-	xr_interface = XRServer.find_interface("OpenXR")
-
-	var check := XRHelpers.check_interface_exists(xr_interface, "xrFindInterface")
-	if not check.success:
-		xr_startup_results.openxr_available = false
-		xr_startup_results.failure_reason = "OpenXR interface not found"
-		xr_init_state = XRHelpers.XRInitState.FAILED
-		_fallback_to_desktop()
-		return
-
-	xr_startup_results.openxr_available = true
-	XRHelpers.log_startup_result(1, true, "OpenXR interface found")
-
-	# Step 2: Query runtime properties
-	XRHelpers.log_startup_step(2, XR_STARTUP_STEPS, "Querying runtime properties")
-	xr_init_state = XRHelpers.XRInitState.CHECKING_RUNTIME
-
-	var runtime_info := XRHelpers.detect_runtime()
-	xr_startup_results.runtime_name = runtime_info.name
-	xr_startup_results.runtime_version = xr_interface.get_name()
-	xr_startup_results.graphics_api = XRHelpers.get_graphics_api_name()
-
-	XRHelpers.log_runtime_properties(xr_startup_results.runtime_name, xr_startup_results.runtime_version)
-	DebugLogger.info(SOURCE, "Graphics API: %s" % xr_startup_results.graphics_api)
-	XRHelpers.log_startup_result(2, true)
-
-	# Step 3: Initialize OpenXR (creates instance, gets system/HMD)
-	XRHelpers.log_startup_step(3, XR_STARTUP_STEPS, "Initializing OpenXR (instance + system)")
-	xr_init_state = XRHelpers.XRInitState.INITIALIZING
-
-	# CRITICAL: Set viewport to XR mode BEFORE initializing
-	# This ensures first frame renders correctly in stereo
-	get_viewport().use_xr = true
-
-	var init_success := xr_interface.is_initialized()
-	if not init_success:
-		init_success = xr_interface.initialize()
-
-	check = XRHelpers.xr_check(init_success, "xrInitialize")
-	if not check.success:
-		xr_startup_results.hmd_detected = false
-		xr_startup_results.failure_reason = "OpenXR initialization failed - HMD may not be connected"
-		xr_init_state = XRHelpers.XRInitState.FAILED
-		_fallback_to_desktop()
-		return
-
-	xr_startup_results.hmd_detected = true
-	XRHelpers.log_startup_result(3, true, "HMD detected and bound")
-
-	# Query system properties
-	_query_xr_system_properties()
-
-	# Step 4: Configure display
-	XRHelpers.log_startup_step(4, XR_STARTUP_STEPS, "Configuring display and view")
-	xr_init_state = XRHelpers.XRInitState.CONFIGURING_DISPLAY
-
-	# Sync physics rate to display refresh (90Hz typical for VR)
-	var refresh_rate := xr_interface.get_display_refresh_rate()
-	if refresh_rate > 0:
-		xr_startup_results.refresh_rate = refresh_rate
-		Engine.physics_ticks_per_second = int(refresh_rate)
-		DebugLogger.info(SOURCE, "Physics rate synced to display: %d Hz" % int(refresh_rate))
-	else:
-		xr_startup_results.refresh_rate = 90.0
-		Engine.physics_ticks_per_second = 90
-		DebugLogger.info(SOURCE, "Using default 90Hz physics rate")
-
-	# Get render target size
-	var render_size := xr_interface.get_render_target_size()
-	xr_startup_results.resolution_per_eye = Vector2i(int(render_size.x), int(render_size.y))
-
-	XRHelpers.log_startup_result(4, true, "%.0fHz @ %dx%d" % [
-		xr_startup_results.refresh_rate,
-		xr_startup_results.resolution_per_eye.x,
-		xr_startup_results.resolution_per_eye.y
-	])
-
-	# Step 5: Verify session ready
-	XRHelpers.log_startup_step(5, XR_STARTUP_STEPS, "Verifying session ready")
-	xr_init_state = XRHelpers.XRInitState.STARTING_SESSION
-
-	# Check action map
-	var action_map_path := ProjectSettings.get_setting("xr/openxr/default_action_map", "")
-	if action_map_path and ResourceLoader.exists(action_map_path):
-		DebugLogger.info(SOURCE, "Action map: %s" % action_map_path)
-	else:
-		DebugLogger.warn(SOURCE, "Action map not found - controller bindings may not work")
-
-	xr_initialized = true
-	xr_init_state = XRHelpers.XRInitState.READY
-	XRHelpers.log_startup_result(5, true, "Session ready")
-
-	# Log startup summary
-	DebugLogger.info(SOURCE, "")
-	XRHelpers.log_startup_summary(xr_startup_results)
-	DebugLogger.info(SOURCE, "XR rendering enabled")
-
-
-func _query_xr_system_properties() -> void:
-	# Query HMD/system info
-	xr_startup_results.hmd_system_name = xr_interface.get_name()
-
-	# Form factor
-	var form_factor_setting := ProjectSettings.get_setting("xr/openxr/form_factor", 0)
-	match form_factor_setting:
-		0: xr_startup_results.form_factor = "Head-Mounted Display"
-		1: xr_startup_results.form_factor = "Handheld"
-		_: xr_startup_results.form_factor = "Unknown"
-
-	# View configuration
-	var view_config := ProjectSettings.get_setting("xr/openxr/view_configuration", 1)
-	match view_config:
-		1: xr_startup_results.view_configuration = "Stereo"
-		2: xr_startup_results.view_configuration = "Mono"
-		_: xr_startup_results.view_configuration = "Config %d" % view_config
-
-	# Foveation
-	xr_startup_results.foveation_level = ProjectSettings.get_setting("xr/openxr/foveation_level", -1)
-
-	XRHelpers.log_system_properties(
-		xr_startup_results.hmd_system_name,
-		xr_startup_results.hmd_vendor_id,
-		xr_startup_results.form_factor
-	)
-
-
-func _fallback_to_desktop() -> void:
-	DebugLogger.warn(SOURCE, "Running in desktop mode (no VR)")
-	desktop_mode = true
-	xr_initialized = true  # Allow _process to run
-
-	# CRITICAL: Disable XR viewport mode for desktop rendering
-	get_viewport().use_xr = false
-
-	# Position camera at eye height (1.6m) for desktop view
-	if xr_camera:
-		xr_camera.position.y = 1.6
-
-	# Position simulated controllers at rest position
-	if left_controller:
-		left_controller.position = Vector3(-0.3, 1.0, -0.3)
-	if right_controller:
-		right_controller.position = Vector3(0.3, 1.0, -0.3)
-
-	# Enable mouse capture for FPS-style controls
-	Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
-
-	# Use standard 60Hz physics for desktop
-	Engine.physics_ticks_per_second = 60
-
-	DebugLogger.info(SOURCE, "Desktop controls: WASD=move, Mouse=look, ESC=release mouse, Space=menu")
-
+# =============================================================================
+# XR SETUP COMPLETE - Now handled by BaseVRScene
+# Removed ~180 lines of duplicated XR initialization code
+# See godot_project/scripts/core/base_vr_scene.gd for implementation
+# =============================================================================
 
 func _setup_controllers() -> void:
 	# Validate XR nodes before configuring

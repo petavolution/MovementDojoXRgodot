@@ -1,10 +1,11 @@
 ## TrainingSequenceScene - Entry point for data-driven training sequences
-## Initializes XR, loads a sequence from SequenceLibrary, and runs it
+## Extends BaseVRScene for consistent XR initialization
+## Loads a sequence from SequenceLibrary and runs it
 ##
 ## Launch with: godot --training-sequence=level1
 ## Or: godot --training-sequence-level1
 class_name TrainingSequenceScene
-extends Node3D
+extends BaseVRScene
 
 const SOURCE := "TrnSeqScene"
 
@@ -12,12 +13,7 @@ const SOURCE := "TrnSeqScene"
 # STATE
 # =============================================================================
 
-var xr_interface: XRInterface
-var xr_origin: XROrigin3D
-var xr_camera: XRCamera3D
-var left_controller: XRController3D
-var right_controller: XRController3D
-
+# Training-specific components
 var sequence_controller: TrainingSequenceController
 var environment_loader: EnvironmentLoader
 var feedback_ui: Level1Feedback  # Reuse existing feedback system
@@ -50,19 +46,60 @@ func _ready() -> void:
 	selected_environment = XRHelpers.get_environment_flag()
 	DebugLogger.info(SOURCE, "Selected environment: %s" % XRHelpers.get_environment_name(selected_environment))
 
-	# Run preflight checks
-	if not _run_preflight_checks():
-		DebugLogger.error(SOURCE, "Preflight checks failed - aborting")
-		_abort_with_error("Preflight checks failed")
+	# Validate sequence exists and is valid (before XR initialization)
+	if not _validate_sequence():
+		DebugLogger.error(SOURCE, "Sequence validation failed - aborting")
+		_abort_with_error("Invalid sequence")
 		return
 
-	# Build scene with validation
+	# Call base class to handle XR initialization
+	# This will call _on_xr_initialized() when ready
+	super._ready()
+
+
+## Validate sequence exists and is structurally correct (training-specific preflight)
+func _validate_sequence() -> bool:
+	DebugLogger.info(SOURCE, "Validating sequence...")
+
+	# Check sequence exists
+	var available := SequenceLibrary.get_available_sequences()
+	var sequence_exists := false
+	for seq_id in available:
+		if seq_id == selected_sequence_id or seq_id.begins_with(selected_sequence_id):
+			sequence_exists = true
+			selected_sequence_id = seq_id  # Use full ID
+			break
+
+	if not sequence_exists:
+		DebugLogger.error(SOURCE, "  FAIL: Unknown sequence '%s'" % selected_sequence_id)
+		DebugLogger.info(SOURCE, "  Available sequences: %s" % ", ".join(available))
+		return false
+	DebugLogger.info(SOURCE, "  ✓ Sequence '%s' found" % selected_sequence_id)
+
+	# Check sequence is valid
+	var sequence := SequenceLibrary.get_sequence(selected_sequence_id)
+	if sequence == null:
+		DebugLogger.error(SOURCE, "  FAIL: Could not create sequence")
+		return false
+
+	var errors := sequence.validate()
+	if not errors.is_empty():
+		DebugLogger.error(SOURCE, "  FAIL: Sequence validation errors:")
+		for err in errors:
+			DebugLogger.error(SOURCE, "    - %s" % err)
+		return false
+	DebugLogger.info(SOURCE, "  ✓ Sequence is valid")
+
+	DebugLogger.info(SOURCE, "Sequence validation: PASSED")
+	return true
+
+
+## Called by BaseVRScene after successful XR initialization
+func _on_xr_initialized() -> void:
+	DebugLogger.info(SOURCE, "XR initialized, building training scene...")
+
+	# Build scene components
 	DebugLogger.info(SOURCE, "Building scene components...")
-	_build_xr_scene()
-	if not _validate_xr_scene():
-		_abort_with_error("XR scene validation failed")
-		return
-
 	_build_environment()
 	_build_entities_container()
 	_build_feedback_ui()
@@ -83,173 +120,21 @@ func _ready() -> void:
 	DebugLogger.flush()  # Ensure initialization is logged before VR starts
 
 
-## Validate XR scene was built correctly
-func _validate_xr_scene() -> bool:
-	var valid := true
-
-	if xr_origin == null:
-		DebugLogger.error(SOURCE, "CRITICAL: XROrigin3D not created")
-		valid = false
-	if xr_camera == null:
-		DebugLogger.error(SOURCE, "CRITICAL: XRCamera3D not created")
-		valid = false
-
-	# Controllers are expected but not strictly required
-	if left_controller == null:
-		DebugLogger.warn(SOURCE, "Left controller not created")
-	if right_controller == null:
-		DebugLogger.warn(SOURCE, "Right controller not created")
-
-	if valid:
-		DebugLogger.debug(SOURCE, "XR scene validation passed")
-	return valid
-
-
-func _process(delta: float) -> void:
-	if not is_initialized:
-		return
-
-	# Check for exit input
-	if Input.is_action_just_pressed("ui_cancel"):
-		_request_exit()
-
-
-func _exit_tree() -> void:
-	DebugLogger.info(SOURCE, "Training sequence scene exiting")
-	if sequence_controller and sequence_controller.is_running():
-		sequence_controller.abort("Scene exit")
+## Called by BaseVRScene when XR initialization fails
+func _on_xr_failed(reason: String) -> void:
+	DebugLogger.error(SOURCE, "XR initialization failed: %s" % reason)
+	_abort_with_error(reason)
 
 
 # =============================================================================
-# PREFLIGHT CHECKS
+# XR SETUP COMPLETE - Now handled by BaseVRScene
+# Removed ~170 lines of duplicated XR initialization code
+# See godot_project/scripts/core/base_vr_scene.gd for implementation
 # =============================================================================
 
-func _run_preflight_checks() -> bool:
-	DebugLogger.info(SOURCE, "Running preflight checks...")
-	DebugLogger.flush()  # Ensure we capture logs even if VR crashes
-
-	# Check 1: OpenXR initialization
-	DebugLogger.info(SOURCE, "  [1/4] OpenXR initialization...")
-	xr_interface = XRServer.find_interface("OpenXR")
-	if xr_interface == null:
-		DebugLogger.error(SOURCE, "  FAIL: OpenXR interface not found")
-		DebugLogger.error(SOURCE, "  Check: Is SteamVR running and set as active OpenXR runtime?")
-		DebugLogger.flush()
-		return false
-
-	if not xr_interface.is_initialized():
-		DebugLogger.info(SOURCE, "  Initializing OpenXR interface...")
-		var init_success := xr_interface.initialize()
-		if not init_success:
-			DebugLogger.error(SOURCE, "  FAIL: OpenXR failed to initialize")
-			DebugLogger.error(SOURCE, "  Check: Is HMD connected via Virtual Desktop?")
-			DebugLogger.error(SOURCE, "  Check: Is SteamVR detecting the Quest 3?")
-			DebugLogger.flush()
-			return false
-	DebugLogger.info(SOURCE, "  PASS: OpenXR initialized")
-	_log_xr_state()
-
-	# Check 2: Sequence exists
-	DebugLogger.info(SOURCE, "  [2/4] Sequence validation...")
-	var available := SequenceLibrary.get_available_sequences()
-	var sequence_exists := false
-	for seq_id in available:
-		if seq_id == selected_sequence_id or seq_id.begins_with(selected_sequence_id):
-			sequence_exists = true
-			selected_sequence_id = seq_id  # Use full ID
-			break
-
-	if not sequence_exists:
-		DebugLogger.error(SOURCE, "  FAIL: Unknown sequence '%s'" % selected_sequence_id)
-		DebugLogger.info(SOURCE, "  Available sequences: %s" % ", ".join(available))
-		return false
-	DebugLogger.info(SOURCE, "  PASS: Sequence '%s' found" % selected_sequence_id)
-
-	# Check 3: Sequence is valid
-	DebugLogger.info(SOURCE, "  [3/4] Sequence structure check...")
-	var sequence := SequenceLibrary.get_sequence(selected_sequence_id)
-	if sequence == null:
-		DebugLogger.error(SOURCE, "  FAIL: Could not create sequence")
-		return false
-
-	var errors := sequence.validate()
-	if not errors.is_empty():
-		DebugLogger.error(SOURCE, "  FAIL: Sequence validation errors:")
-		for err in errors:
-			DebugLogger.error(SOURCE, "    - %s" % err)
-		return false
-	DebugLogger.info(SOURCE, "  PASS: Sequence is valid")
-
-	# Check 4: XR session is ready
-	DebugLogger.info(SOURCE, "  [4/4] XR session ready check...")
-	if xr_interface and xr_interface.is_initialized():
-		var refresh := xr_interface.get_display_refresh_rate()
-		if refresh > 0:
-			DebugLogger.info(SOURCE, "  PASS: XR session ready (%.0f Hz)" % refresh)
-		else:
-			DebugLogger.warn(SOURCE, "  WARN: Refresh rate unknown, continuing anyway")
-	else:
-		DebugLogger.error(SOURCE, "  FAIL: XR interface lost during preflight")
-		return false
-
-	DebugLogger.info(SOURCE, "Preflight checks: ALL PASSED")
-	DebugLogger.flush()  # Ensure preflight results are saved
-	return true
-
-
-## Log current XR system state for debugging
-func _log_xr_state() -> void:
-	if xr_interface == null:
-		DebugLogger.warn(SOURCE, "  XR State: Interface is null")
-		return
-
-	DebugLogger.info(SOURCE, "  XR State:")
-	DebugLogger.info(SOURCE, "    Interface: %s" % xr_interface.get_name())
-	DebugLogger.info(SOURCE, "    Initialized: %s" % xr_interface.is_initialized())
-
-	var refresh := xr_interface.get_display_refresh_rate()
-	if refresh > 0:
-		DebugLogger.info(SOURCE, "    Refresh Rate: %.0f Hz" % refresh)
-
-	var render_size := xr_interface.get_render_target_size()
-	if render_size.x > 0:
-		DebugLogger.info(SOURCE, "    Render Size: %dx%d per eye" % [int(render_size.x), int(render_size.y)])
-
-
 # =============================================================================
-# SCENE BUILDING
+# SCENE BUILDING (Training-Specific)
 # =============================================================================
-
-func _build_xr_scene() -> void:
-	DebugLogger.debug(SOURCE, "Building XR scene...")
-
-	# Create XR Origin
-	xr_origin = XROrigin3D.new()
-	xr_origin.name = "XROrigin3D"
-	add_child(xr_origin)
-
-	# Create XR Camera
-	xr_camera = XRCamera3D.new()
-	xr_camera.name = "XRCamera3D"
-	xr_origin.add_child(xr_camera)
-
-	# Create left controller
-	left_controller = XRController3D.new()
-	left_controller.name = "LeftController"
-	left_controller.tracker = "left_hand"
-	xr_origin.add_child(left_controller)
-
-	# Create right controller
-	right_controller = XRController3D.new()
-	right_controller.name = "RightController"
-	right_controller.tracker = "right_hand"
-	xr_origin.add_child(right_controller)
-
-	# Enable XR
-	get_viewport().use_xr = true
-
-	DebugLogger.debug(SOURCE, "XR scene built")
-
 
 func _build_environment() -> void:
 	DebugLogger.debug(SOURCE, "Building environment...")
